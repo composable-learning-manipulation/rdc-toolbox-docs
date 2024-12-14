@@ -1,0 +1,138 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% \file       specification.tex
+% \brief      Спецификация
+% \date       28.02.23 - создан
+% \author     Соболев А.А.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[specification]{../espd}
+\input{../preamble} % Преамбула
+
+\graphicspath{{./images/}} % Директория для картинок в тексте
+%
+\def\endline{\xrowht[(3.5mm)]{3.5mm}\tabularnewline\hline} % окончание строки для краткости
+%\def\endline{\tabularnewline\hline} % окончание строки для краткости
+\def\emptyline{~ & ~ & ~ \endline} % пустая строка для краткости
+%
+\begin{document} % Начало документа
+\clubpenalty=10000 % Это костыль против
+\widowpenalty=10000 % "висячих" строк
+\righthyphenmin=200 % Избавляемся
+{\sloppy % от переносов слов
+\makelisttitle{\titlemode} % Титульный лист
+%
+% Сама таблица спецификации:
+%
+{
+	
+%\setlength{\oddsidemargin}{20mm}
+%\setlength{\evensidemargin}{10mm}
+%\setlength{\sidemargin}{20mm}
+%\setlength{\textwidth}{180mm} % Ширина области текста документа
+%\renewcommand{\ULdepth}{1.8pt}
+\normalsize %\tabletextsize % нормоконтроль хочет 14 шрифт...
+%\begin{longtable}[c]{|>{\raggedright}m{74mm}|>{\raggedright}m{64mm}|>{\raggedright}m{24mm}|}
+\vspace{-5mm} % Сдвижка вверх потому что сделали поле верхнее 30 мм вместо 25
+\reversemarginpar
+\setlength{\marginparsep}{5.2mm}
+% \marginpar{	%
+%{%
+%	\vskip -5.0mm
+%	\setlength{\tabcolsep}{0mm}	
+\renewcommand{\ULdepth}{1.8pt}\tabletextsize
+\begin{longtable}[c]{|>{\raggedright}m{74mm}|>{\raggedright}m{64mm}|>{\raggedright}m{24mm}|}
+	%----------------------- преамбула ---------------------	
+	\hline
+	\centering{Обозначение} & 
+	\centering{Наименование} & 
+	\centering{Примечание} \xrowht[(5mm)]{5mm}\tabularnewline
+	\hhline{|=|=|=|}\hline
+	\endfirsthead % Конец заголовка на 1 странице
+	\hline
+	% Способ, при котором раздельно формуруется выравнивание заголовка и контетнта
+	\centering{Обозначение} & 
+	\centering{Наименование} & 
+	\centering{Примечание} \xrowht[(5mm)]{5mm}\tabularnewline
+	\hhline{|=|=|=|}
+	\endhead
+	\hline
+	\endfoot
+	\hline
+	\endlastfoot	
+	%------------------- табличные данные ------------------		
+	~ & ~ & ~ \xrowht[(3.5mm)]{3.5mm}\tabularnewline\hline
+	~ & \centering{\uline{Документация}} & ~ \xrowht[(3.5mm)]{3.5mm}\tabularnewline\hline
+	~ & ~ & ~ \xrowht[(3.5mm)]{3.5mm}\tabularnewline\hline		
+
+	\productcodefull-01-ЛУ    & Программа самодиагностики & ~ \endline	
+	~    & датчика положения. & ~ \endline
+	~    & Спецификация. & ~ \endline	
+	~ & Лист утверждения & ~ \endline	
+	\emptyline
+
+	\productcodefull-01 12 01    & Программа самодиагностики & ~ \endline	
+	~    & датчика положения. & ~ \endline	
+	~    & Текст программы & ~ \endline	
+	\emptyline
+
+	\productcodefull-01 12 01-ЛУ & Программа самодиагностики & ~\endline	
+	~ & датчика положения. & ~\endline
+	~ & Текст программы. & ~\endline	
+	~ & Лист утверждения & ~ \endline	
+	\emptyline
+
+	\productcodefull-01 13 01    & Программа самодиагностики & ~ \endline
+	~    & датчика положения. & ~ \endline
+	~    & Описание программы & ~ \endline	
+	\emptyline
+	\productcodefull-01 13 01-ЛУ & Программа самодиагностики & ~ \endline
+	~    & датчика положения. & ~ \endline
+	~    & Описание программы. & ~ \endline
+	~ & Лист утверждения & ~ \endline	
+	\emptyline
+
+	\productcodefull-01 32 01    & Программа самодиагностики & ~ \endline
+	~    & датчика положения. & ~ \endline
+	~ & Руководство системного & ~ \endline	
+	~ & программиста & ~ \endline	
+	\newpage
+	\emptyline
+	\productcodefull-01 32 01-ЛУ & Программа самодиагностики & ~ \endline
+	~    & датчика положения. & ~ \endline
+	~ & Руководство системного & ~\endline
+	~ & программиста. & ~ \endline	
+	~ & Лист утверждения & ~ \endline	
+	\emptyline	
+	% То что далее НАДО по ГОСТ, нужно оставить несколько строк для записей
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline	
+	\emptyline
+	\emptyline	
+	\emptyline
+	\emptyline	
+	\emptyline
+	\emptyline	
+	\emptyline
+	\emptyline	
+	\emptyline
+	\emptyline	
+	\emptyline
+	\emptyline	
+	\emptyline	
+\end{longtable}
+}
+}
+%
+% Лист регистрации изменений по ЕСПД
+\registrationlistESPD 
+% \registrationlistESKD 
+% }
+\end{document}

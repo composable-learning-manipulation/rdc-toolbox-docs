@@ -1,0 +1,115 @@
+\begin{lstlisting}[caption=\raggedright{mcu-libs/RLS.cpp}, frame=single]
+    
+#include "RLS.h"
+
+RLS *createRLS(int num_vars, float lam, float delta)
+{
+    RLS *rls = (RLS *)malloc(sizeof(RLS));
+    rls->num_vars = num_vars;
+    rls->A = createMatrix(num_vars, num_vars);
+    for (int i = 0; i < num_vars; i++)
+    {
+        for (int j = 0; j < num_vars; j++)
+        {
+            rls->A->data[i][j] = (i == j) ? delta : 0.0;
+        }
+    }
+    rls->w = createMatrix(num_vars, 1);
+    rls->lam_inv = 1.0 / lam;
+    rls->sqrt_lam_inv = sqrt(rls->lam_inv);
+    return rls;
+}
+
+void freeRLS(RLS *rls)
+{
+    freeMatrix(rls->A);
+    freeMatrix(rls->w);
+    free(rls);
+}
+
+void addObs(RLS *rls, Matrix *x, float t)
+{
+    Matrix *xT = transposeMatrix(x);
+
+    Matrix *Ax = matrixProduct(rls->A, x);
+    Matrix *z = multiplyScalarToMatrix(Ax, rls->lam_inv);
+    Matrix *zT = transposeMatrix(z);
+
+    Matrix *xTz = matrixProduct(xT, z);
+    float alpha = 1.0 / (1.0 + xTz->data[0][0]);
+
+    Matrix *zt = multiplyScalarToMatrix(z, t);
+    Matrix *wpzt = addMatrices(zt, rls->w);
+    Matrix *xTwpzt = matrixProduct(xT, wpzt);
+    float smth = t - alpha * xTwpzt->data[0][0];
+    Matrix *dw = multiplyScalarToMatrix(z, smth);
+    Matrix *neww = addMatrices(rls->w, dw);
+    freeMatrix(rls->w);
+    rls->w = neww;
+
+    Matrix *zzT = matrixProduct(z, zT);
+    Matrix *alphaZZT = multiplyScalarToMatrix(zzT, -alpha);
+    Matrix *newA = addMatrices(rls->A, alphaZZT);
+    freeMatrix(rls->A);
+    rls->A = newA;
+
+    freeMatrix(z);
+    freeMatrix(Ax);
+    freeMatrix(xT);
+    freeMatrix(xTz);
+    freeMatrix(zT);
+    freeMatrix(zzT);
+    freeMatrix(alphaZZT);
+    freeMatrix(wpzt);
+    freeMatrix(zt);
+    freeMatrix(xTwpzt);
+    freeMatrix(dw);
+}
+
+void fit(RLS *rls, Matrix **X, float *y, int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        addObs(rls, X[i], y[i]);
+    }
+}
+
+float predict(RLS *rls, Matrix *x)
+{
+    Matrix *wt = transposeMatrix(rls->w);
+    Matrix *result = matrixProduct(wt, x);
+    float prediction = result->data[0][0];
+    freeMatrix(wt);
+    freeMatrix(result);
+    return prediction;
+}
+
+Matrix *createPredictVector(RLS *rls, float mid)
+{
+    Matrix *vec = createMatrix(rls->num_vars, 1);
+    for (int j = 0; j < rls->num_vars; j++)
+    {
+        vec->data[j][0] = pow(mid, j);
+    }
+    return vec;
+}
+
+float binarySearch(RLS *rls, float low, float high, float lim_val)
+{
+    while (low - high < -1)
+    {
+        float mid = low + (high - low) / 2.0;
+        Matrix *vec = createPredictVector(rls, mid);
+        float mid_val = predict(rls, vec);
+        freeMatrix(vec);
+
+        if (fabs((mid_val - lim_val) / lim_val) < 0.0001)
+            return mid;
+        else if (mid_val > lim_val)
+            low = mid;
+        else
+            high = mid;
+    }
+    return high;
+}
+\end{lstlisting}

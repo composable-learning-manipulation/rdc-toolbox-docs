@@ -1,0 +1,33 @@
+\begin{lstlisting}[caption=\raggedright{mcu-libs/Matrix.h}, frame=single]
+#pragma once
+
+#include "math.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <assert.h>
+#include <stdbool.h>
+
+struct Matrix
+{
+    int rows;
+    int cols;
+    float **data;
+    float operator()(uint16_t row, uint16_t col) const
+    {
+        return data[row][col];
+    };
+};
+
+Matrix *createMatrix(int rows, int cols);
+Matrix *matrixProduct(Matrix *A, Matrix *B);
+Matrix *transposeMatrix(Matrix *matrix);
+Matrix *getMatrixMinor(Matrix *matrix, int row, int col);
+Matrix *getMatrixInverse(Matrix *matrix);
+Matrix *addScalarToMatrix(Matrix *matrix, float scalar);
+Matrix *multiplyScalarToMatrix(Matrix *matrix, float scalar);
+Matrix *addMatrices(Matrix *matrix1, Matrix *matrix2);
+float getMatrixDeterminant(Matrix *matrix);
+void freeMatrix(Matrix *matrix);
+void printMatrix(Matrix *matrix);
+\end{lstlisting}

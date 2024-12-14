@@ -1,0 +1,6 @@
+services:
+  latex:
+    image: registry.gitlab.com/lab_449/espd-template:latest
+    container_name: docker-latex-drv-self
+    volumes:
+      - .:/workspace

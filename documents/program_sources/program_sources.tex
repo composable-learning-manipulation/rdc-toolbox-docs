@@ -1,0 +1,99 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% \file       example.tex
+% \brief      Пример
+% \date       18.05.22 - создан
+% \author     Соболев А.А.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[codelisting]{../espd}
+%\usepackage{algorithm,algpseudocode} % old style
+\input{../preamble} % Преамбула
+\input{../algo} % Алгоритмы
+\graphicspath{{./images/}} % Директория для картинок в тексте
+\begin{document} % Начало документа
+\clubpenalty=10000 % Это костыль против
+\widowpenalty=10000 % "висячих" строк
+\righthyphenmin=200 % Избавляемся
+{\sloppy % от переносов слов
+\makelisttitle{\titlemode} % Титульный лист
+{
+	\cleardoublepage
+	\phantomsection
+	\pdfbookmark[1]{Аннотация}{annotation}
+	\input{src/аннотация.tex}
+}
+{
+	\cleardoublepage
+	\phantomsection
+	\pdfbookmark[1]{\wordcontents}{toc}
+	\tableofcontents % Содержание
+}
+%
+% Дальше пошли разделы
+% \input{src/оформление_разделов.tex}
+% \input{src/оформление_перечислений.tex}
+% \input{src/оформление_иллюстраций.tex}
+% \input{src/оформление_формул.tex}
+% \input{src/оформление_таблиц.tex}
+% \input{src/листинг.tex}
+
+
+% \input{src/аннотация.tex}
+
+\newpage\section{Исходный код}
+
+В данном разделе приводятся фрагменты исходного кода программы.
+
+\subsection{Папка $mcu-libs$, файл $Matrix.h$}
+\input{src/code/mcu-libs/Matrix.h.tex}
+\subsection{Папка $mcu-libs$, файл $Matrix.cpp$}
+\input{src/code/mcu-libs/Matrix.cpp.tex}
+\subsection{Папка $mcu-libs$, файл $RLS.h$}
+\input{src/code/mcu-libs/RLS.h.tex}
+\subsection{Папка $mcu-libs$, файл $RLS.cpp$}
+\input{src/code/mcu-libs/RLS.cpp.tex}
+
+\subsection{Папка $./$, файл $dsp\_rfft\_windowed.h$}
+\input{src/code/dsp_rfft_windowed.h.tex}
+\subsection{Папка $./$, файл $dsp\_rfft\_windowed.cpp$}
+\input{src/code/dsp_rfft_windowed.cpp.tex}
+\subsection{Папка $./$, файл $dsp\_setup.h$}
+\input{src/code/dsp_setup.h.tex}
+\subsection{Папка $./$, файл $dsp\_setup.cpp$}
+\input{src/code/dsp_setup.cpp.tex}
+\subsection{Папка $./$, файл $sensor\_self\_diagnostic.h$}
+\input{src/code/sensor_self_diagnostic.h.tex}
+\subsection{Папка $./$, файл $sensor\_self\_diagnostic.cpp$}
+\input{src/code/sensor_self_diagnostic.cpp.tex}
+
+
+% \subsection{Файл $CMakeLists.txt$}
+% \input{src/CMakeLists.txt.tex}
+
+% \subsection{Файл $docker-compose.yaml$}
+% \input{src/docker-compose.yaml.tex}
+
+% \subsection{Файл $Dockerfile$}
+% \input{src/Dckerfile.tex}
+
+% \input{src/оформление_алгоритмов.tex}
+%
+% Перечень литературы
+\cleardoublepage
+\phantomsection
+\bibliography{bibliography}
+%
+% Перечень сокращений
+% \cleardoublepage
+% \phantomsection
+% \input{src/аббревиатуры}
+%
+% Приложения
+% \input{src/приложение_1}
+% \input{src/приложение_2}
+%
+% Лист регистрации изменений по ЕСПД
+\registrationlistESPD
+}
+\end{document}
