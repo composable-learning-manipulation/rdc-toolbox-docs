@@ -3,4 +3,595 @@
 % Раздел <<Выполнение программы>> содержит сведения о последовательности действий оператора, обеспечивающих загрузку, запуск, выполнение и завершение программы. Приведено описание функций, формата и возможных вариантов команд, с помощью которых оператор осуществляет загрузки и управляет выполнением программы, а также ответы программы на эти команды.
 
 Взаимодействие оператора и программы обеспечивается посредством интерфейса командной строки или консоли.
-Во всех режимах предусмотрена форма интерактивного взаимедйствия, где оператору необходимо ввести или входные данные или подтвердить дальнейшее выполнение программы.
+Для всех комманд программы предусмотрена форма интерактивного взаимедйствия, где оператору необходимо ввести или входные данные или подтвердить дальнейшее выполнение программы.
+
+Ниже представлена структурированная документация по командам для вызова и их параметрам.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+    rdc [OPTIONS] COMMAND [ARGS]...
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-calib}{%
+\subsubsection{rdc calib}\label{rdc-calib}}
+
+Калибровка СК датчика силы/инструмента
+
+Эту команду следует использовать перед проверкой rdcm модели.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc calib [OPTIONS] COMMAND [ARGS]...
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-calib-ftsensor}{%
+\paragraph{rdc calib ftsensor}\label{rdc-calib-ftsensor}}
+
+Калибровка СК датчика силы.
+
+Команда используется для оценки положения центра и ориентации датчика силы в мировой системе координат.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc calib ftsensor [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5.2cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-urdf\_z1} & text & путь до urdf робота &
+\texttt{./urdfs/z1\_ee.urdf} \\
+\hline
+\texttt{-\/-urdf\_z1\_link\_name} & text & название СК конца рабочего инструмента &
+\texttt{link\_ee} \\
+\hline
+\texttt{-\/-urdf\_tool} & text & путь до urdf рабочего инструмента &
+\texttt{./urdfs/tool\_calib.urdf} \\
+\hline
+\texttt{-\/-urdf\_tool\_link\_name} & text & название СК основания рабочего инструмента & \texttt{tool\_start\_link} \\
+\hline
+\texttt{-\/-urdf\_sensor} & text & путь до результирующей urdf датчика силы &
+\texttt{./urdfs/sensor.urdf} \\
+\hline
+\texttt{-\/-pitch\_deg} & float & угол наклона платформы вокруг оси x &
+\texttt{0} \\
+\hline
+\texttt{-\/-roll\_deg} & float & угол наклона платформы вокруг оси y &
+\texttt{0} \\
+\hline
+\texttt{-\/-synth} & boolean & синтетические данные & \texttt{False} \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\hline
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-calib-tool}{%
+\paragraph{rdc calib tool}\label{rdc-calib-tool}}
+
+Калибровка СК рабочего инструмента робота
+
+Команда может использоваться для оценки координат и ориентации наконечника рабочего инструмента в системе координат последнего звена робота.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc calib tool [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{4.5cm}|p{2cm}|p{4.0cm}|p{5.2cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-urdf\_robot} & text & путь до urdf робота &
+\texttt{./urdfs/z1\_ee.urdf} \\
+\texttt{-\/-urdf\_tool} & text & путь до urdf рабочего инструмента &
+\texttt{./urdfs/tool.urdf} \\
+\texttt{-\/-fixed\_joint\_name} & text & имя сочленения для присоединения рабочего инструмента &
+\texttt{fixed\_tool\_joint} \\
+\texttt{-\/-out\_urdf} & text & путь до urdf откалиброванного рабочего инструмента &
+\texttt{./urdfs/tool\_calib.urdf} \\
+\texttt{-\/-load\_data} & text & путь до данных для калибровки & None \\
+\texttt{-\/-num\_poses} & integer & количество  точек для калибровки
+(мин.:3, рекомм.:30) & \texttt{30} \\
+\texttt{-\/-assume\_coaxial} & boolean & предполагать что рабочий инструмент соосен последнему звену & \texttt{False} \\
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-exec}{%
+\subsubsection{rdc exec}\label{rdc-exec}}
+
+Выполнить на работе предоставленную в csv траекторию
+
+Проверить траекторию на самостолкновения и столкновения с полом, а затем выполнить ее используя Z1RobotApi.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc exec [OPTIONS] COMMAND [ARGS]...
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-exec-traj}{%
+\paragraph{rdc exec traj}\label{rdc-exec-traj}}
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc exec traj [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-urdf\_path} & text & путь до urdf модели рообота &
+\texttt{urdfs/z1\_ee.urdf} \\
+\hline
+\texttt{-\/-meshes\_path} & text & путь до mesh моделей робота &
+\texttt{urdfs/meshes} \\
+\hline
+\texttt{-\/-data\_path} & text & путь до директории с траекторией для выполнения \\
+\hline
+\texttt{-\/-sim} & boolean & если True, скрипт будет запущен в режиме симуляции. & \texttt{False} \\
+\hline
+\texttt{-r} & boolean & если True, скрипт будет рекурсивно выполняться для каждого найденного файла desired\_trajectory.csv & \texttt{False} \\
+\hline
+\texttt{-\/-skip\_exist} & boolean & если True, скрипт пропустит папки, где есть записи & \texttt{False} \\
+\hline
+\texttt{-\/-joint\_num} & text & какой номер сочленения использовать. Работает только для траекторий трения & None \\
+\hline
+\texttt{-\/-type} & choise (\texttt{nominal} \textbar{} \texttt{slow}
+\textbar{} \texttt{warmup}) & тип траектории & \texttt{nominal} \\
+\hline
+\texttt{-\/-refine\_dt} & boolean & выполнить проверку dt между точками траектории и пересчитать траекторию для более высокого dt & \texttt{True} \\
+\hline
+\texttt{-\/-check} & boolean & выполнить проверку траектории на самостолкновение, ограничения точек и столкновение с полом перед выполнением &
+\texttt{True} \\
+\hline
+\texttt{-\/-times} & integer диапазон (от \texttt{1} до \texttt{100})
+& Число повторений траектории & \texttt{1} \\
+\hline
+\texttt{-\/-load\_urdf\_path} & text & путь к модели urdf для номинальной нагрузки & None \\
+\hline
+\texttt{-\/-load\_attached\_frame\_name} & text & звено на роботе для крепления модели номинальной нагрузки& None \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-gen}{%
+\subsubsection{rdc gen}\label{rdc-gen}}
+
+Генерация траекторий для идентификации
+
+Создание каталогов с csv, содержащих специальные траектории для обратной динамической идентификации модели
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc gen [OPTIONS] COMMAND [ARGS]...
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-gen-fourier}{%
+\paragraph{rdc gen fourier}\label{rdc-gen-fourier}}
+
+Запустить генерацию оптимальной траектории на основе ряда Фурье для последовательного робота-манипулятора.
+
+Пример использования:
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc gen fourier -\/-pipeline\_name pipeline\_no\_load -\/-output\_path
+logs -\/-save\_plots
+\end{lstlisting}
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc gen fourier [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-config\_path} & text & путь до config-файла с параметрами генерации. &
+\texttt{./configs/fourier\_trajectory\_optimization\_pipelines.yaml} \\
+\hline
+\texttt{-\/-pipeline\_name} & text & выбрать алгоритм для выполнения. Если не указано выполняет все алгоритмы & `` \\
+\hline
+\texttt{-\/-output\_path} & text & директория для сохранения сгенерированных траекторий & \texttt{logs} \\
+\hline
+\texttt{-\/-save\_plots} & boolean & сохранять графики &
+\texttt{False} \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\hline
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-gen-friction}{%
+\paragraph{rdc gen friction}\label{rdc-gen-friction}}
+
+Сгенерировать траектории для идентиикации трения.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc gen friction [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-config\_path} & text & путь до конфига для генерации трения &
+\texttt{./configs/z1\_friction\_gen\_traj\_config.yaml} \\
+\hline
+\texttt{-\/-urdf\_path} & text & путь до urdf модели робота&
+\texttt{./urdfs/z1\_ee.urdf} \\
+\hline
+\texttt{-\/-output\_path} & text & путь для сохранения траекторий &
+\texttt{./data/friction} \\
+\hline
+\texttt{-\/-skip\_exist} & boolean & если True, директории, где ...desired\_trajectory.csv уже существуют будут промущены & \texttt{False} \\
+\hline
+\texttt{-\/-type} & text & тип генерируемой траектории & friction \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-ident}{%
+\subsubsection{rdc ident}\label{rdc-ident}}
+
+Идентификация модели обратной динамики.
+
+Проидентифицировать полную модель или только модель трения на собранном датасете. В результате будет получена \textit{.rdcm} модель
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc ident [OPTIONS] COMMAND [ARGS]...
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-ident-friction}{%
+\paragraph{rdc ident friction}\label{rdc-ident-friction}}
+Идентификация модели трения
+Перед использованием сгенерируйте и выполните специальные LSPB траектории.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc ident friction [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-data\_path} & text & путь для чтения траекторий &
+\_required \\
+\hline
+\texttt{-\/-save\_path} & text & путь до сохранения модели & \_required \\
+\hline
+\texttt{-\/-offset} & integer & оффсет для плато & \texttt{50} \\
+\hline
+\texttt{-\/-save\_plots\_path} & text & путь для сохранения графиков & None \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\hline
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-ident-full}{%
+\paragraph{rdc ident full}\label{rdc-ident-full}}
+
+Идентификация полной модели обратной динамики
+
+Перед использованием необходимо сгенерировать и выполнить траектории для сбора датасета.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc ident full [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-config\_path} & text & путь до файла config-файла &
+\texttt{configs/learning\_config.yaml} \\
+\hline
+\texttt{-\/-urdf\_path} & text & путь до urdf файла робота &
+\texttt{urdfs/z1\_ee.urdf} \\
+\hline
+\texttt{-\/-save\_path} & text & путь, куда необходимо сохранить .rdcm модель &
+\texttt{.} \\
+\hline
+\texttt{-\/-model\_name} & text & название модели & \_required \\
+\hline
+\texttt{-\/-data\_path} & text & Path to directory containing
+recorded\_trajectory.csv & \_required \\
+\hline
+\texttt{-r}, \texttt{-\/-recursive} / \texttt{-nr},
+\texttt{-\/-no\_recursive} & boolean & не искать csv датасетов рекурсивно &
+\texttt{True} \\
+\hline
+\texttt{-\/-save\_dataset} / \texttt{-\/-no\_save\_dataset} & boolean &
+путь до сохранения полного датасета, полученного путем агрегированния при рекурсивном поиске& \texttt{True} \\
+\hline
+\texttt{-\/-accel\_mode} & choice (\texttt{data} \textbar{}
+\texttt{estimate} \textbar{} \texttt{off}) & как получить ускорения: data (напрямую из датасета), estimate (путем численного дифференцирования) или off (не использовать ускорения, принудительно использовать фильтрованную динамику) & \texttt{estimate} \\
+\hline
+\texttt{-\/-train\_ratio} & float range (between \texttt{0} and
+\texttt{1}) & соотношение для разделения датасета на train и test & \texttt{0.75} \\
+\hline
+\texttt{-\/-plot}, \texttt{-p} / \texttt{-\/-no\_plot}, \texttt{-np} &
+boolean & выводить графики результатов обучения & \texttt{True} \\
+\hline
+\texttt{-v}, \texttt{-\/-verbose} / \texttt{-q}, \texttt{-\/-quiet} &
+boolean & выводить служебную информацию & \texttt{True} \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-verification}{%
+\subsubsection{rdc verification}\label{rdc-verification}}
+
+Верификаци модели обратной динамики.
+
+Верификация модели обратной динамики методом вычисленных моментов или по оценке пространственных сил и моментов на рабочем инструменте манипулятора.
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc verification [OPTIONS] COMMAND [ARGS]...
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-verification-torques}{%
+\paragraph{rdc verification torques}\label{rdc-verification-torques}}
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc verification torques [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-traj\_dir\_path} & text & N/A &
+\texttt{./data/base\_trj/opttraj\_0\_85cond\_7h\_2000Hz/recorded\_\_19\_11\_2024\_18\_13\_56} \\
+\hline
+\texttt{-\/-roll\_angle} & float & угол наклона платформы вокруг оси x & \texttt{0.0} \\
+\hline
+\texttt{-\/-pitch\_angle} & float & угол наклона платформы вокруг оси y & \texttt{0.0} \\
+\hline
+\texttt{-\/-rdc\_path} & text & путь до .rdcm модели &
+\texttt{{[}\textquotesingle{}full.rdcm\textquotesingle{},\ \textquotesingle{}rdc\_model\_new.rdcm\textquotesingle{}{]}} \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}
+
+\hypertarget{rdc-verification-wrenches}{%
+\paragraph{rdc verification wrenches}\label{rdc-verification-wrenches}}
+
+\textbf{Использование:}
+\begin{lstlisting}[language=python, numbers=none, frame=single]
+rdc verification wrenches [OPTIONS]
+\end{lstlisting}
+
+\textbf{Параметры:}
+\begin{center}
+\fontsize{10pt}{10pt}\selectfont
+\begin{longtable}[]{p{5cm}|p{2cm}|p{3.5cm}|p{5cm}}
+    \hline
+\toprule()
+Параметр & Тип & Описание & По умолчанию \\
+\hline
+\midrule()
+\endhead
+\texttt{-\/-urdf\_system} & text & путь до urdf робота с инструментом
+&
+\texttt{./urdfs/z1\_tool.urdf} \\
+\hline
+\texttt{-\/-rdc\_path} & text & путь до .rdcm модели &
+\texttt{rdc\_model\_new.rdcm} \\
+\hline
+\texttt{-\/-num\_poses} & integer & колличество положений для сбора датасета &
+\texttt{1} \\
+\hline
+\texttt{-\/-tool\_link\_name} & text & название СК конца рабочего инструмента &
+\texttt{tool\_end\_link} \\
+\hline
+\texttt{-\/-ft\_transform\_urdf} & text & urdf с СК ft датчика &
+\texttt{./urdfs/sensor.urdf} \\
+\hline
+\texttt{-\/-ft\_link\_name} & text & название СК датчика, где измеряются силы &
+\texttt{sensor\_link} \\
+\hline
+\texttt{-\/-roll\_angle} & float & угол наклона платформы вокруг оси x & \texttt{0.0} \\
+\hline
+\texttt{-\/-pitch\_angle} & float & угол наклона платформы вокруг оси y & \texttt{0.0} \\
+\hline
+\texttt{-\/-save\_data} & boolean & сохранять или нет собранные данные (будет создан csv файл) & \texttt{False} \\
+\hline
+\texttt{-\/-approaching\_speed} & float & скорость надавливания в точке & \texttt{0.005} \\
+\hline
+\texttt{-\/-max\_force} & float & максимальная сила, прикладываемая к ft датчику &
+\texttt{60.0} \\
+\hline
+\texttt{-\/-help} & boolean & показать справку &
+\texttt{False} \\
+\bottomrule()
+\hline
+\end{longtable}
+\end{center}

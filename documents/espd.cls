@@ -140,6 +140,9 @@
 %\newcommand{\listingtextsize}{\fontsize{11pt}{11pt}\selectfont}
 \newcommand{\footnotesize}{\fontsize{10pt}{12pt}\selectfont}
 \newcommand{\footnotetextsize}{\fontsize{12pt}{15pt}\selectfont}
+
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Бумага
 \setlength{\paperwidth}{210mm}
