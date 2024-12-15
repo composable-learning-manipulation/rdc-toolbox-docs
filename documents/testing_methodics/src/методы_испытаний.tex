@@ -1,0 +1,410 @@
+\newpage
+\section{Методы испытаний}
+
+\subsection{Настройка окружения для проведения тестирования} \label{reqtest:setup}
+Для проведения испытаний программы \productname\ для организации удаленной разработки и тестирования моделей и алгоритмов планирования и управления движением роботов необходимо выполнить следующие действия:
+
+
+\subsubsection{Подготовка кластера Kubernetes}
+
+Для развертывания приложения необходимо выполнить предварительную подготовку кластера Kubernetes microk8s.
+
+Активируйте следующие плагины для microk8s:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    microk8s enable dns hostpath-storage ingress metallb
+\end{lstlisting}
+Для metallb выберите диапазон адресов: 192.168.55.105-192158.55.120
+
+Обновите kube config:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    microk8s config > ~/.kube/config
+\end{lstlisting}
+
+Создайте пространство имен для kubectl:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    kubectl create namespace rf-checker-test
+    kubectl create namespace rf-website-test
+\end{lstlisting}
+
+Создайте imagePullSecret в gitlab, как показано ниже, для скачивания из приватного реестра образов:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    kubectl create secret docker-registry regcred -n rf-checker-test --docker-server=https://registry.gitlab.com --docker-username=<TOKEN NAME| USERNAME> --docker-password=<TOKEN> 
+    kubectl create secret docker-registry regcred -n rf-website-test --docker-server=https://registry.gitlab.com --docker-username=<TOKEN NAME| USERNAME> --docker-password=<TOKEN> 
+\end{lstlisting}
+А также выполните авторизацию для werf:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    werf cr login registry.gitlab.com/roboforces-itmo/platform/ --username <TOKEN_NAME | USERNAME> --password <TOKEN>
+\end{lstlisting}
+
+Предварительно токен нужно создать в сервисе, который используется для ведения рееста образов.
+
+
+Добавьте ярлык для ноды вашего Kubernetes кластера:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    kubectl label node <NODE_NAME> power=high
+    kubectl label node <NODE_NAME> worker=main
+    kubectl label node <NODE_NAME> server=web
+\end{lstlisting}
+
+NODE\_NAME, т.е имя ноды может быть получено путем вызова команды:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    kubectl get nodes
+\end{lstlisting}
+
+Создайте необходимые CRDs:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    microk8s kubectl apply -f crds/argo-crds-namespaced.yaml
+\end{lstlisting}
+
+
+
+
+\subsubsection{Запуск модуля rf-checker программы \productname}
+Для развертывания модуля установите его с помощью werf:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    werf converge --repo registry.gitlab.com/roboforces-itmo/platform/rf-checker --set replicaCount=0 --set tenant.enabled=true --dev --env test
+\end{lstlisting}
+При этом также в кластере будут автоматически установлены redis и argo-workflow Helm-чарты, необходимы для работы моодуля rf-checker \productname. 
+Для запуска при тестировании рекомендуется использовать Docker compose, путем вызова:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    docker compose up --build
+\end{lstlisting}
+
+С этого момента программа считается запущенной. Коммуникация с программой может быть осужествлена посредством отправки запросов в Redis очередь \textbf{rf-queue}. Для подключения к Redis, необходимо знать IP адрес и порт подключения. Чтобы их узнать можно воспользоваться инструментом kubectl, входящим в состав Kubernetes microk8s:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    microk8s.kubectl get all . -n rf-checker-test
+\end{lstlisting}
+Пароль для подключения определяется в файле .local.env файла на момент его создания.
+
+\subsubsection{Запуск модуля rf-website программы \productname}
+Для развертывания модуля установите его с помощью werf:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    werf converge --dev --repo "registry.gitlab.com/roboforces-itmo/platform/rf-website" --env test --set redis.enabled=false
+\end{lstlisting}
+При этом также в кластере будут автоматически установлены mongodb и Postgres Helm-чарты, необходимы для работы модуля rf-website \productname. 
+С этого момента программа считается запущенной. Для подключения к сайту, необходимо знать IP адрес и порт подключения. Чтобы их узнать можно воспользоваться инструментом kubectl, входящим в состав Kubernetes microk8s:
+\begin{lstlisting}[language=bash, numbers=none, frame=single]
+    microk8s.kubectl get all . -n rf
+\end{lstlisting}
+
+Чтобы сделать программу доступной по IP хоста, необходимо ввести команду для открытия порта:
+\begin{lstlisting}[language=bash, numbers=none]
+    microk8s.kubectl port-forward service/rf-website-test 8000:8080 -n rf-website-test
+\end{lstlisting}
+
+При запуске веб-страницы программы (\url{http://127.0.0.1:8000}) выводится подробная информация о содержании и возможностях клиентского модуля. В случае возникновения любых проблем при работе с программой клиентского модуля, веб-страничка отобразит информацию об обшибке или успешном выполнении.
+
+
+\subsection{Проведение испытаний программы \productname\ по п. \ref{req:functionality} ПМ приема и обработки запросов на проверку} \label{reqtest:functionality}
+Для проведения испытаний модуля rf-checker  программы \productname\ для организации удаленной разработки и тестирования моделей и алгоритмов планирования и управления движением роботов оператор выполняет действия, указанные в п. \ref{reqtest:setup}, после чего делает следующее:
+\begin{enumerate}
+    \item Закрывает все открытые командные строки
+    \item Оператор актуализирует информацию в конфигурационном файле, об используемом Kubernetes кластере:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+        microk8s config > ~/.kube/config
+    \end{lstlisting}
+    \item В другой консоли оператор переходит с помощью командной строки, открытой в корне директории программы в директорию $checking\_worker$:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    cd checking_worker
+    \end{lstlisting}
+    \item Оператор запускает программу для тестирования:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    python3 tests/test_send_simple_python_task.py
+    \end{lstlisting}
+\end{enumerate}
+Программа \programname\ считается выдержавшей проверку, если результат выведенный в командной строке соответсвует п. \ref{req:functionality} ПМ.
+
+
+\subsubsection{Проверка по п. \ref{req:scoring} ПМ получения и агрегации результатов} \label{reqtest:scoring}
+
+Для проведения испытаний модуля rf-checker  программы \productname\ для организации удаленной разработки и тестирования моделей и алгоритмов планирования и управления движением роботов оператор выполняет действия, указанные в п. \ref{reqtest:setup}, после чего делает следующее:
+\begin{enumerate}
+    \item Закрывает все открытые командные строки
+    \item Оператор актуализирует информацию в конфигурационном файле, об используемом Kubernetes кластере:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+        microk8s config > ~/.kube/config
+    \end{lstlisting}
+    \item В другой консоли оператор переходит с помощью командной строки, открытой в корне директории программы в директорию $checking\_worker$:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    cd checking_worker
+    \end{lstlisting}
+    \item Оператор запускает программу для тестирования:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    python3 tests/test_send_checking_pipline.py
+    \end{lstlisting}
+\end{enumerate}
+Программа \programname\ считается выдержавшей проверку, если результат выведенный в командной строке соответсвует п. \ref{req:scoring} ПМ.
+
+\subsubsection{Проверка по п. \ref{req:git_tools} ПМ загрузки решения и задач из репозиториев} \label{reqtest:git_tools}
+Для проведения испытаний модуля rf-checker платформы \productname\ для организации удаленной разработки и тестирования моделей и алгоритмов планирования и управления движением роботов оператор выполняет действия, указанные в п. \ref{reqtest:setup}, после чего делает следующее:
+\begin{enumerate}
+    \item Закрывает все открытые командные строки
+    \item Оператор актуализирует информацию в конфигурационном файле, об используемом Kubernetes кластере:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+        microk8s config > ~/.kube/config
+    \end{lstlisting}
+    \item В другой консоли оператор переходит с помощью командной строки, открытой в корне директории программы в директорию $checking\_worker$:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    cd checking_worker
+    \end{lstlisting}
+    \item Оператор запускает программу для тестирования:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    python3 tests/test_git_tools.py
+    \end{lstlisting}
+\end{enumerate}
+Программа \programname\ считается выдержавшей проверку, если результат выведенный в командной строке соответсвует п. \ref{req:git_tools} ПМ.
+
+\subsubsection{Проверка по п. \ref{req:load} ПМ эффективности при высокой пользовательской нагрузке} \label{reqtest:load}
+Для проведения испытаний модуля rf-checker платформы \productname\ для организации удаленной разработки и тестирования моделей и алгоритмов планирования и управления движением роботов оператор выполняет действия, указанные в п. \ref{reqtest:setup}, после чего делает следующее:
+\begin{enumerate}
+    \item Закрывает все открытые командные строки
+    \item Оператор актуализирует информацию в конфигурационном файле, об используемом Kubernetes кластере:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+        microk8s config > ~/.kube/config
+    \end{lstlisting}
+    \item В другой консоли оператор переходит с помощью командной строки, открытой в корне директории программы в директорию $checking\_worker$:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    cd checking_worker
+    \end{lstlisting}
+    \item Оператор запускает программу для нагрузочного тестирования:
+    \begin{lstlisting}[language=bash, numbers=none, frame=single]
+    python3 tests/test_load.py
+    \end{lstlisting}
+\end{enumerate}
+Программа \programname\ считается выдержавшей проверку, если результат представленный на графике нагрузочной характеристики соответсвует п. \ref{req:load} ПМ.
+
+\subsection{Проверка по п. \ref{req:check-self-email} ПМ авторизации через тестовую почту} \label{reqtest:pm-1}
+Для проведения испытаний модуля rf-website платформы \productname\ необходимо выполнить подготовительные действия.
+
+Оператор выполняет действия, указанные в Руководстве оператора, после чего делает сделующее:
+\begin{enumerate}
+    \item Оператор открывает веб-браузер, вводит в строке следующий адрес платформы веб-интерфейса программы \url{http://127.0.0.1:8000/}, см. \ref{fig:url_enter}, и нажимает клавишу Enter↵,. \label{it: start-page}
+    \illustration[][Пример ввода url.][0.9]{pmi_7_3/1.url_enter}[fig:url_enter]
+
+    \item Оператор разворачивает меню слева, нажав на стрелку в верхнем левом углу и переходит во вкладку <<Личный кабинет>, см \ref{fig:lk}. \label{it: lk}
+    \illustration[][Переход в личный кабинет.][0.3]{pmi_7_3/3.lk}[fig:lk]
+
+    \item Затем оператор переходит по ссылке <<Зарегистрируйтесь сейчас>>.
+    \illustration[][Указатель на ссылку <<Зарегистрируйтесь сейчас>>.][0.3]{pmi_7_3/4.sign_up_link}[fig:signup-link]
+
+    \item Оператор вводит заготовленные логин и дважды пароль, затем клавишу <<Зарегистрироваться>> \ref{fig:link_signup}. Оператор должен увидеть результат как на \ref{fig:ask_confirm_email}.
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Указатель на ссылку <<Зарегистрироваться>>.][0.9]{pmi_7_3/5.lk_self_data}[fig:link_signup]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Сообщение о подтверждении адреса.][0.9]{pmi_7_3/6.email_resul}[fig:ask_confirm_email]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item Оператор открывает почту, находит письмо от платформы roboforces и переходит по ссылке для подтверждения почты \ref{fig:confirm_msg_email}. После перехода по ссылке оператор нажимает на кнопку <<Подтвердить>> \ref{fig:email_confirm}. \label{it: email-accout-data}
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Сообщение по подтверждению почты.][0.9]{pmi_7_3/7.email_check}[fig:confirm_msg_email]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Сообщение о подтверждении адреса.][0.9]{pmi_7_3/6.1.email_confirm}[fig:email_confirm]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item Оператор возвращается на начальную страничку веб-интерфейса \url{http://127.0.0.1:8000/} как в п. \ref{it: start-page} инструкции, открывает вкладку <<Личный кабинет>>, аналогично п. \ref{it: lk} инструкции, вводит email и пароль из п. \ref{it: email-accout-data} инструкции, далее нажимает кнопку  <<Войти>>, см. \ref{fig:enter_acc}.
+    \illustration[][Страница входа в аккаунт.][0.5]{pmi_7_3/8.enter_account}[fig:enter_acc]
+
+    \item Оператор открывает вкладку <<Личный кабинет>>, аналогично п. \ref{it: lk} инструкции, и проверяет наличие информации в поле <<Ваше имя на ресурсе>> (см \ref{fig:nikname}).
+    \illustration[][Страница личного кабинета.][0.5]{pmi_7_3/9.nikname}[fig:nikname]
+\end{enumerate}
+
+
+\subsection{Проверка по п. \ref{req:check-gitlab-email} ПМ авторизации через Gitlab} \label{reqtest:pm-2}
+Для проведения испытаний модуля rf-website платформы \productname\ необходимо выполнить подготовительные действия.
+
+Оператор должен предварительно авторизоваться на веб-сайте \url{gitlab.com}
+
+Оператор выполняет действия, указанные в пункте~\ref{reqtest:setup}, после чего делает сделующее:
+\begin{enumerate}
+    \item Оператор открывает новую вкладку в браузере и выполняет п. \ref{it: start-page} - \ref{it: lk} раздела \ref{reqtest:pm-1}.
+    \item Оператор нажимает иконку Gitlab \ref{fig:gitlab_auth_icon}. Оператора перенесет по ссылке, где он нажимает на кнопку <<Authorize>> \ref{fig:gitlab_email_confirm}.
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Указатель на иконку gitlab.][0.9]{pmi_7_4/1.Auth}[fig:gitlab_auth_icon]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Подтверждение авторизации через gitlab.][0.9]{pmi_7_4/4.auth_gitlab_access}[fig:gitlab_email_confirm]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item Оператор переходит на почту от аккаунта Github и подтверждает ее, аналогично п. \ref{it: email-accout-data} раздела \ref{reqtest:pm-1}.
+    \item Оператор возвращается на начальную страницу \url{http://127.0.0.1:8000/} как в п. \ref{it: start-page}, открывает вкладку <<Личный кабинет>>, нажимает на иконку Gitlab и нажимает на кнопку <<Продолжить>>, чтобы авторизоваться. После этого оператора автоматически перенесет на стартовую страницу веб-интерфейса.
+    \item Оператор открывает вкладку <<Личный кабинет>>, аналогично п. \ref{it: lk} инструкции раздела \ref{reqtest:pm-1}, и проверяет наличие информации в поле <<Ваше имя на ресурсе>>.
+\end{enumerate}
+
+\subsection{Проверка по п. \ref{req:check-github-email} ПМ авторизации через Github} \label{reqtest:pm-3}
+Для проведения испытаний модуля rf-website платформы \productname\ необходимо выполнить подготовительные действия.
+
+Оператор должен предварительно авторизоваться на веб-сайте \url{github.com}
+
+Оператор выполняет действия, указанные в пункте~\ref{reqtest:setup}, после чего делает сделующее:
+\begin{enumerate}
+    \item Оператор открывает новую вкладку в браузере и выполняет п. \ref{it: start-page} - \ref{it: lk} раздела \ref{reqtest:pm-1}.
+    \item Оператор нажимает иконку Github \ref{fig:github_auth_icon}, далее его перенесет по ссылке, где он нажимает на кнопку <<Authorize roboforces-itmo>> \ref{fig:github_email_confirm}.
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Указатель на иконку github.][0.9]{pmi_7_5/1.Auth}[fig:github_auth_icon]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Подтверждение авторизации через github.][0.9]{pmi_7_5/3.github_email_verfication}[fig:github_email_confirm]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item Оператор переходит на почту от аккаунта Github и подтверждает ее, аналогично п. \ref{it: email-accout-data} раздела \ref{reqtest:pm-1}.
+    \item Оператор возвращается на начальную страницу \url{http://127.0.0.1:8000/} как в п. \ref{it: start-page}, открывает вкладку <<Личный кабинет>>, нажимает на иконку Github и нажимает на кнопку <<Продолжить>>, чтобы авторизоваться. После этого оператора автоматически перенесет на стартовую страницу веб-интерфейса.
+    \item Оператор открывает вкладку <<Личный кабинет>>, аналогично п. \ref{it: lk} инструкции раздела \ref{reqtest:pm-1}, и проверяет наличие информации в поле <<Ваше имя на ресурсе>>.
+\end{enumerate}
+
+\subsection{Проверка по п. \ref{req:check-competitions} ПМ создание новых соревнований и задач} \label{reqtest:pm-4}
+Для проведения испытаний модуля rf-website платформы \productname\ необходимо выполнить подготовительные действия.
+
+Оператор выполняет действия, указанные в пункте~\ref{reqtest:setup}, после чего делает сделующее:
+\begin{enumerate}
+    \item Для получения доступа к базе данных оператор получает данные для авторизации от разработчика (например, Username: admin, Password: admin).
+    \item Оператор открывает веб-браузер и вводит в строке следующий адрес веб-интерфейса программы \url{http://127.0.0.1:8000/admin}. Далее вводит в поля <<Username>> и <<Password>> данные для авторизации из предыдущего пункта инструкции. В результате оператор должен увидеть страницу администратора с таблицами <<ACCOUNTS>>, <<AUTHENTICATION AND AUTHORIZATION>>, <<CONTESTS>>, <<SITES>> и др., как на рисунке ниже.
+    \illustration[][Страница администратора веб интерфейса.][0.5]{pmi_7_6/1.admin_view}[fig:admin_veiw]
+
+    \item Чтобы добавить новое соревнование оператор находит таблицу <<CONTESTS>> и кликает по полю <<Competitions>> \ref{fig:competition_table}, чтобы перейти на страницу создания соревнования. Далее оператор нажимает на кнопку <<ADD COMPETITION +>> \ref{fig:add_comp_btn}.
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Вид таблицы <<Competitions>>.][0.9]{pmi_7_6/2.Compettions}[fig:competition_table]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Указатель на кнопку <<ADD COMPETITION +>>.][0.9]{pmi_7_6/3.add_comp}[fig:add_comp_btn]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item Оператор заполняет информацию о соревновании, пример указан на рисунках ниже. Важно загрузить изображение в поле <<Image>> и заполнить поле <<Description>>.
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Форма для создания соревнования 1.][0.9]{pmi_7_6/4.1.info}[fig:comp_form_1]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Форма для создания соревнования 2.][0.9]{pmi_7_6/4.2.info}[fig:comp_form_2]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item После завершения заполнения всех полей оператор нажимает на клавишу <<Save>>, после чего его перенесет обратно к полю <<Competitions>>, где он должен увидеть, что появилось новая запись в базе данных с указанным в предыдущем пункте инструкции названием соревнования см. \ref{fig:finish_comp_fill}.
+    \illustration[][Верификация создания нового соревнования.][0.5]{pmi_7_6/5.Finish_comptition}[fig:finish_comp_fill]
+    Финально, оператор возвращается на стартовую страницу панели администратора, нажав по ссылке <<Home>> в левом верхнем углу, что указывает стрелка на рисунке выше.
+
+    \item Чтобы добавить новую задачу к соревнованию оператор находит таблицу <<CONTESTS>> и кликает по полю <<Tasks>>, чтобы перейти на страницу создания соревнования. Далее оператор нажимает на кнопку <<ADD TASK +>>.
+    \item Далее оператор должен получить данные (Dev repo, Dev token name, Dev token, Workflow path) от разработчика и ввести их в соотвествующие поля.
+    \item Оператор заполняет все поля в форме и выбирает <<Competition object>> в поле <<Competition>>, см пример рисунках ниже.
+    {
+        \centering
+        \begin{tabular}[c]{ m{0.5\textwidth} m{0.5\textwidth} }		
+            {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Форма для создания задачи 1.][0.9]{pmi_7_6/7.task_info_1}[fig:task_form_1]
+                \end{minipage}
+            } & {
+                \begin{minipage}[t]{0.45\textwidth}
+                    \centering
+                    \illustration[][Форма для создания задачи 2.][0.9]{pmi_7_6/8.task_info_2}[fig:task_form_2]
+                \end{minipage}
+            } \\		
+        \end{tabular}
+    }
+
+    \item После завершения заполнения всех полей оператор нажимает на клавишу <<Save>>, после чего его перенесет обратно к полю <<Competitions>>, где он должен увидеть, что появилось новая запись в базе данных с указанным в предыдущем пункте инструкции названием задачи см. \ref{fig:save_task}.
+    \illustration[][Верификация создания новой задачи.][0.5]{pmi_7_6/9.task_save}[fig:save_task]
+\end{enumerate}
+
+\subsection{Проверка по п. \ref{req:check-sol-submit} ПМ отправки алгоритма управления движением робота на тестирование} \label{reqtest:pm-5}
+Для проведения испытаний модуля rf-website платформы \productname\ необходимо выполнить подготовительные действия.
+
+Оператор выполняет действия, указанные в пункте~\ref{reqtest:setup}, после чего делает сделующее:
+\begin{enumerate}
+    \item Оператор открывает терминал и вводит команду:
+    \begin{lstlisting}[language=bash, numbers=none]
+        celery --broker=redis://:testo-mesto@127.0.0.1:6379// flower
+    \end{lstlisting}
+    \item Для получения доступа к веб-интерфесу программы оператор получает данные для авторизации от разработчика (например, Username: test-user@gmail.com, Password: test-user).
+    \item Оператор открывает новую вкладку в браузере и выполняет п. \ref{it: start-page} - \ref{it: lk} раздела \ref{reqtest:pm-1}. Далее вводит в поля <<Username>> и <<Password>> данные для авторизации из предыдущего пункта инструкции и нажимает кнопку <<Войти>>.
+    \item После входа оператор должен увидеть соревнования, которые были добавлены в разделе \ref{reqtest:pm-4}. Оператор должен нажать на кнопку <<Перейти к соревнованию>>, где он увидит задачу. Оператор нажимает на кнопку <<Перейти к задаче>>.
+    \item Разработчик должен выдать оператору следующую дополнительную информацию (Href to repository и из раздела Repo token два поля Token Name, Token), которую вводит в соответветствующие поля.
+    \item Оператор нажимает на кнопку <<Отправить на проверку>>.
+    \item Чтобы проверить, что задача успешно была отправлена на проверку, оператор должен открыть новую страницу в веб-браузере \url{http://127.0.0.1:5555/}. И увидеть ненулевое значение в графе <<Active>> или <<Precessed>>, см. \ref{fig:load_task_verif}.
+    \illustration[][Верификация загрузки алгоритма на проверку.][0.9]{pmi_7_7/1.flower_result}[fig:load_task_verif]
+\end{enumerate}
+
+
+\newpage
+\section{Отчетность}
+
+\subsection{Оформление результатов испытаний}
+Результаты испытаний по каждому пункту требований к программе оформляются протоколами, представляемыми на заседании комиссии. Типовая форма протокола испытаний приведена в приложении А.
+
+В протоколы вносятся все первичные данные, получаемые в процессе испытаний.
+
+Большой объем первичных данных (в том числе, распечаток ЭВМ, содержащих однозначную привязку к месту, времени и объекту испытаний) допускается приводить в приложениях к протоколам, подписываемых лицами, проводящими испытания.
+
+По результатам испытаний в течение 3 дней комиссией составляется акт испытаний.
+
+Акт испытаний должен содержать:
+\begin{enumerate}
+    \item подтверждение выполнения программы испытаний;
+    \item оценку результатов испытаний с конкретными точными формулировками, отражающими соответствие испытуемого комплекса требованиям ТЗ;
+    \item выводы по результатам испытаний.
+\end{enumerate}
+
+К акту прилагаются протоколы испытаний по пунктам программы.
+
+Первичные материалы испытаний хранятся у Исполнителя.
+

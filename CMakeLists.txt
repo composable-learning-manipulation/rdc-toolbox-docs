@@ -11,3 +11,5 @@ add_subdirectory(documents/specification)
 add_subdirectory(documents/program_description)
 add_subdirectory(documents/program_sources)
 add_subdirectory(documents/operator_manual)
+
+add_subdirectory(documents/testing_methodics)
