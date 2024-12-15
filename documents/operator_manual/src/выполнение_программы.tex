@@ -3,7 +3,7 @@
 % Раздел <<Выполнение программы>> содержит сведения о последовательности действий оператора, обеспечивающих загрузку, запуск, выполнение и завершение программы. Приведено описание функций, формата и возможных вариантов команд, с помощью которых оператор осуществляет загрузки и управляет выполнением программы, а также ответы программы на эти команды.
 
 Взаимодействие оператора и программы обеспечивается посредством интерфейса командной строки или консоли.
-Для всех комманд программы предусмотрена форма интерактивного взаимедйствия, где оператору необходимо ввести или входные данные или подтвердить дальнейшее выполнение программы.
+Для всех команд программы предусмотрена форма интерактивного взаимедйствия, где оператору необходимо ввести или входные данные или подтвердить дальнейшее выполнение программы.
 
 Ниже представлена структурированная документация по командам для вызова и их параметрам.
 
@@ -30,7 +30,7 @@
 \end{center}
 
 \hypertarget{rdc-calib}{%
-\subsubsection{rdc calib}\label{rdc-calib}}
+\subsection{rdc calib}\label{rdc-calib}}
 
 Калибровка СК датчика силы/инструмента
 
@@ -59,7 +59,7 @@ rdc calib [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-calib-ftsensor}{%
-\paragraph{rdc calib ftsensor}\label{rdc-calib-ftsensor}}
+\subsubsection{ Команда rdc calib ftsensor}\label{rdc-calib-ftsensor}}
 
 Калибровка СК датчика силы.
 
@@ -111,7 +111,7 @@ rdc calib ftsensor [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-calib-tool}{%
-\paragraph{rdc calib tool}\label{rdc-calib-tool}}
+\subsubsection{ Команда rdc calib tool}\label{rdc-calib-tool}}
 
 Калибровка СК рабочего инструмента робота
 
@@ -134,16 +134,23 @@ rdc calib tool [OPTIONS]
 \endhead
 \texttt{-\/-urdf\_robot} & text & путь до urdf робота &
 \texttt{./urdfs/z1\_ee.urdf} \\
+\hline
 \texttt{-\/-urdf\_tool} & text & путь до urdf рабочего инструмента &
 \texttt{./urdfs/tool.urdf} \\
+\hline
 \texttt{-\/-fixed\_joint\_name} & text & имя сочленения для присоединения рабочего инструмента &
 \texttt{fixed\_tool\_joint} \\
+\hline
 \texttt{-\/-out\_urdf} & text & путь до urdf откалиброванного рабочего инструмента &
 \texttt{./urdfs/tool\_calib.urdf} \\
+\hline
 \texttt{-\/-load\_data} & text & путь до данных для калибровки & None \\
+\hline
 \texttt{-\/-num\_poses} & integer & количество  точек для калибровки
 (мин.:3, рекомм.:30) & \texttt{30} \\
+\hline
 \texttt{-\/-assume\_coaxial} & boolean & предполагать что рабочий инструмент соосен последнему звену & \texttt{False} \\
+\hline
 \texttt{-\/-help} & boolean & показать справку &
 \texttt{False} \\
 \bottomrule()
@@ -152,7 +159,7 @@ rdc calib tool [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-exec}{%
-\subsubsection{rdc exec}\label{rdc-exec}}
+\subsection{rdc exec}\label{rdc-exec}}
 
 Выполнить на работе предоставленную в csv траекторию
 
@@ -181,7 +188,7 @@ rdc exec [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-exec-traj}{%
-\paragraph{rdc exec traj}\label{rdc-exec-traj}}
+\subsubsection{ Команда rdc exec traj}\label{rdc-exec-traj}}
 
 \textbf{Использование:}
 \begin{lstlisting}[language=python, numbers=none, frame=single]
@@ -237,7 +244,7 @@ rdc exec traj [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-gen}{%
-\subsubsection{rdc gen}\label{rdc-gen}}
+\subsection{rdc gen}\label{rdc-gen}}
 
 Генерация траекторий для идентификации
 
@@ -266,7 +273,7 @@ rdc gen [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-gen-fourier}{%
-\paragraph{rdc gen fourier}\label{rdc-gen-fourier}}
+\subsubsection{ Команда rdc gen fourier}\label{rdc-gen-fourier}}
 
 Запустить генерацию оптимальной траектории на основе ряда Фурье для последовательного робота-манипулятора.
 
@@ -310,7 +317,7 @@ rdc gen fourier [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-gen-friction}{%
-\paragraph{rdc gen friction}\label{rdc-gen-friction}}
+\subsubsection{ Команда rdc gen friction}\label{rdc-gen-friction}}
 
 Сгенерировать траектории для идентиикации трения.
 
@@ -350,7 +357,7 @@ rdc gen friction [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-ident}{%
-\subsubsection{rdc ident}\label{rdc-ident}}
+\subsection{rdc ident}\label{rdc-ident}}
 
 Идентификация модели обратной динамики.
 
@@ -379,7 +386,7 @@ rdc ident [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-ident-friction}{%
-\paragraph{rdc ident friction}\label{rdc-ident-friction}}
+\subsubsection{ Команда rdc ident friction}\label{rdc-ident-friction}}
 Идентификация модели трения
 Перед использованием сгенерируйте и выполните специальные LSPB траектории.
 
@@ -416,7 +423,7 @@ rdc ident friction [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-ident-full}{%
-\paragraph{rdc ident full}\label{rdc-ident-full}}
+\subsubsection{ Команда rdc ident full}\label{rdc-ident-full}}
 
 Идентификация полной модели обратной динамики
 
@@ -478,7 +485,7 @@ boolean & выводить служебную информацию & \texttt{Tru
 \end{center}
 
 \hypertarget{rdc-verification}{%
-\subsubsection{rdc verification}\label{rdc-verification}}
+\subsection{rdc verification}\label{rdc-verification}}
 
 Верификаци модели обратной динамики.
 
@@ -507,7 +514,7 @@ rdc verification [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-verification-torques}{%
-\paragraph{rdc verification torques}\label{rdc-verification-torques}}
+\subsubsection{ Команда rdc verification torques}\label{rdc-verification-torques}}
 
 \textbf{Использование:}
 \begin{lstlisting}[language=python, numbers=none, frame=single]
@@ -542,7 +549,7 @@ rdc verification torques [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-verification-wrenches}{%
-\paragraph{rdc verification wrenches}\label{rdc-verification-wrenches}}
+\subsubsection{ Команда rdc verification wrenches}\label{rdc-verification-wrenches}}
 
 \textbf{Использование:}
 \begin{lstlisting}[language=python, numbers=none, frame=single]
