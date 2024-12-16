@@ -1,0 +1,137 @@
+\begin{lstlisting}[language=python, caption=\raggedright{verification/torques\_verification.py}, frame=single]
+import click
+from rdc_tools.utils import DATA_PATH
+
+
+@click.command(name="torques")
+@click.option(
+    "--traj_dir_path",
+    default=DATA_PATH
+    + "/base_trj/opttraj_0_85cond_7h_2000Hz/recorded__19_11_2024_18_13_56",
+    prompt="The name of trajectory folder",
+)
+@click.option(
+    "--roll_angle",
+    default=0.0,
+    prompt="Platform's roll angle (deg)",
+)
+@click.option(
+    "--pitch_angle",
+    default=0.0,
+    prompt="Platforms's pitch angle (deg)",
+)
+@click.option(
+    "--rdc_path",
+    default=["full.rdcm","rdc_model_new.rdcm"],
+    multiple=True,
+    help="Path to rdc model",
+)
+def torques(traj_dir_path, roll_angle, pitch_angle, rdc_path):
+    import warnings
+    from rdc_toolbox.visualization import (
+        compose_two_plot,
+        one_plot,
+        compose_multiple_comparison_plots,
+    )
+    import pandas as pd
+    from os import listdir
+    from rdc_toolbox.execution import eval_dataset_for_model
+    from rdc_toolbox.data_processing.offline_filtration import get_filtred
+    from rdc_toolbox.model import BaseRDCModel
+    import eagerpy as ep
+    from pytransform3d import rotations as pr
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    warnings.filterwarnings("ignore")
+
+    filenames = listdir(traj_dir_path)
+    traj_path = None
+    for fn in filenames:
+        if (not "desired" in fn) and (fn[-3:] == "csv"):
+            traj_path = traj_dir_path + "/" + fn
+            break
+    if traj_path is None:
+        click.echo("Not valid trajectory path!")
+        click.Abort()
+        return
+    click.echo(f"Found '{fn}' trajectory. Processing...")
+
+    rdc_models = [BaseRDCModel.load(rdc_pth) for rdc_pth in rdc_path]
+    rdc_names = [rdc_pth.split("/")[-1][:-5] for rdc_pth in rdc_path]
+
+    df_1 = pd.read_csv(traj_path)
+    df_1["timestamp"] -= df_1["timestamp"][0]
+
+
+    df_1 = get_filtred(
+        data_in=df_1,
+        names=["dq"],
+        graph=[False, False],
+        filter_type="butterworth",
+        dt=0.002,
+        order=6,
+        cutoff_hz=0.75,
+    )
+    for i in range(0, 6):
+        df_1[f"ddq_{i}"] = np.gradient(df_1[f"dq_{i}"], df_1["timestamp"])
+    for i in range(6):
+        df_1.loc[df_1[f"dq_{i}"].abs() < 0.01, f"dq_{i}"] = 0
+
+    df_1 = get_filtred(
+        data_in=df_1,
+        names=["q", "ddq", "tau"],
+        graph=[False, False],
+        filter_type="butterworth",
+        dt=0.002,
+        order=6,
+        cutoff_hz=0.75,
+    )
+
+    dfs_comp = [
+        eval_dataset_for_model(
+            rdc_models[i],
+            df_1,
+            ep.astensor(
+                pr.matrix_from_euler(
+                    [np.deg2rad(roll_angle), np.deg2rad(pitch_angle), 0.0],
+                    0,
+                    1,
+                    2,
+                    True,
+                )
+            ),
+        )
+        for i in range(len(rdc_models))
+    ]
+
+    compose_multiple_comparison_plots(
+        df_1,
+        dfs_comp,
+        names=["tau_0", "tau_1", "tau_2", "tau_3", "tau_4", "tau_5"],
+        title=f"Joint torques. Roll: {roll_angle}, Pitch: {pitch_angle}",
+        labels=["measured"] + rdc_names,
+        show=False,
+    )
+
+    one_plot(
+        df_1,
+        ["q_0", "q_1", "q_2", "q_3", "q_4", "q_5"],
+        title=f"Joint positions. Roll: {roll_angle}, Pitch: {pitch_angle}",
+        show=False,
+    )
+
+    one_plot(
+        df_1,
+        ["dq_0", "dq_1", "dq_2", "dq_3", "dq_4", "dq_5"],
+        title=f"Joint velocities. Roll: {roll_angle}, Pitch: {pitch_angle}",
+        show=False,
+    )
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    torques()
+
+\end{lstlisting}

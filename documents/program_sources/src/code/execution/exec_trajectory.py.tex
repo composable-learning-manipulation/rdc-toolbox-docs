@@ -1,0 +1,211 @@
+\begin{lstlisting}[language=python, caption=\raggedright{execution/exec\_trajectory.py}, frame=single]
+import sys, os
+import copy
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from enum import Enum, auto
+import tempfile
+import click
+from rdc_tools.utils import RDCTools_logger, DATA_PATH, LOGGER_CONFIG_PATH, URDF_PATH, CONFIG_PATH
+from pathlib import Path
+
+import yaml
+import time
+import logging
+
+
+class TrjTypes(Enum):
+    FRICTION = "nominal"
+    NOMINAL = "nominal"
+    SLOW = "slow"
+    WARMUP = "warmup"
+
+TRJ_NAME_PATTERN = {
+    TrjTypes.FRICTION: "desired_trajectory.csv",
+    TrjTypes.NOMINAL: "desired_trajectory.csv",
+    TrjTypes.SLOW: "slow_trajectory.csv",
+    TrjTypes.WARMUP: "warmup_trajectory.csv"
+}
+
+@click.command(name="traj")
+@click.option('--urdf_path', default=os.path.join("urdfs", 'z1_ee.urdf'), help='Path to urdf model')
+@click.option('--meshes_path', default=os.path.join("urdfs", 'meshes'), help='Path to model meshes')
+@click.option('--data_path', required=True, help='Path where desired trajectories are stored')
+@click.option('--sim', is_flag=True, show_default=True, default=False, help='If true, script will be running in simulation')
+@click.option('-r', is_flag=True, show_default=True, default=False, help='If true, script will recursively be executed for every founded desired_trajectory.csv file')
+@click.option('--skip_exist', is_flag=True, show_default=True, default=False, help='If true, script will skip folders where recordings exist')
+@click.option('--joint_num', default=None, help='Specify which joint num use. Works only for friction trajectories')
+@click.option(
+    "--type",
+    type=click.Choice([TrjTypes.NOMINAL.value, TrjTypes.SLOW.value, TrjTypes.WARMUP.value], case_sensitive=False),
+    default=TrjTypes.NOMINAL.value, show_default=True, help='Type of trajectory'
+)
+@click.option('--refine_dt', default=True, show_default=True, help=f'Perform checking dt between points in trajectory and recalculate trajectory for lower dt')
+@click.option('--check', default=True, show_default=True, help=f'Perform checking on trajectory self-collision, qoint limits and collision with floor before execution')
+@click.option('--times', default=1, type=click.IntRange(1, 100),  help='Count of trajectory repeats')
+@click.option('--load_urdf_path', default=None, help='Path to urdf model for nominal load')
+@click.option('--load_attached_frame_name', default=None, help='Frame from robot URDF to attach the load model')
+@click.option('--dithering_config_path', default=os.path.join(CONFIG_PATH, 'dithering_config.yaml'), help='Path to config for dithering')
+
+def exec_traj(urdf_path, meshes_path, data_path, sim, r, skip_exist, joint_num, type, refine_dt, check, times, load_urdf_path, load_attached_frame_name, dithering_config_path):
+    from rdc_toolbox.trajectory import Trajectory
+    from rdc_toolbox.trajectory import get_friction_identification_trajectories
+    from rdc_toolbox.utils import get_pinocchio_models_from_description, get_robot_with_tool_pinmodel, merge_urdfs_with_fixed_joint
+    from rdc_toolbox.execution import RobotTrajectoryExecutor
+
+    RDCTools_logger.initialize(LOGGER_CONFIG_PATH, "exec_trajectory")
+    logger = logging.getLogger("interactive")
+
+    full_pinmodel = None
+    full_geommodel = None
+
+
+    pinmodel, _, geommodel = (
+        get_pinocchio_models_from_description(
+            urdf_path,
+            meshes_path,
+        )
+    )
+
+    with open(dithering_config_path) as dithering_config_path:
+        dithering_config = yaml.load(dithering_config_path, Loader=yaml.SafeLoader)
+
+    if not load_urdf_path is None:
+        tool_pinmodel, _, tool_geommodel = (
+            get_pinocchio_models_from_description(
+                load_urdf_path,
+                meshes_path,
+            )
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".urdf") as tmp:
+            if load_attached_frame_name is None:
+                load_attached_frame_name = pinmodel.frames[-1].name
+
+            merge_urdfs_with_fixed_joint(urdf_path, load_urdf_path, load_attached_frame_name, tool_pinmodel.frames[1].name, tmp.name)
+            tmp.flush()
+
+            full_pinmodel, _, full_geommodel = get_pinocchio_models_from_description(
+                tmp.name,
+                meshes_path,
+            )
+    else:
+        full_pinmodel = pinmodel
+        full_geommodel = geommodel
+
+    if sim:
+        from rdc_toolbox.execution.robots import SimRobotApi
+        robot_api = SimRobotApi(full_pinmodel, full_geommodel, 0.002)
+    else:
+        from rdc_toolbox.execution.robots import Z1RobotAPI
+        robot_api = Z1RobotAPI(gripper=False, dithering_params=dithering_config)
+        robot_api.connect()
+
+    start_robot_position = copy.deepcopy(robot_api.q)
+
+    current_directory = Path.joinpath(Path.cwd(), data_path)
+    # print(current_directory)
+    path_trajectories_to_execute = []
+    
+    trj_type = TrjTypes(type)
+    if current_directory.is_file():
+        logger.error(f"Provided data_path is a file. Please choose the directory with trajectory\n")
+        exit(1)
+    if not r:
+        desired_trajectory_path = Path.joinpath(current_directory, TRJ_NAME_PATTERN[trj_type])
+        try:
+            parent_dir = desired_trajectory_path.parent
+            folder_exists = any(folder.name.startswith('recorded') for folder in parent_dir.iterdir() if folder.is_dir())
+            if not joint_num is None and parent_dir.name.split('_')[1] != str(joint_num):
+                logger.warning('Skipped because different joint num')
+            elif skip_exist and folder_exists:
+                logger.warning('Skipped because recording already exists')
+            else:
+                path_trajectories_to_execute.append(desired_trajectory_path)
+        except Exception as e:
+            logger.error(f"Cannot read file: {type(e)}, {e}\n")
+            exit(1)
+    else:
+        desired_trajectory_path = current_directory
+        logger.info("Opening: %s", desired_trajectory_path)
+        for path in current_directory.rglob('*'):
+            
+            if path.name == TRJ_NAME_PATTERN[trj_type]:
+                logger.info(f"'{TRJ_NAME_PATTERN[trj_type]}' found in: {path.parent}")
+                parent_dir = path.parent
+
+                if trj_type == TrjTypes.FRICTION:
+                    if not joint_num is None and parent_dir.name.split('_')[1] != str(joint_num):
+                        logger.warning('Skipped because different joint num')
+                        continue 
+
+                folder_exists = any(folder.name.startswith('recorded') for folder in parent_dir.iterdir() if folder.is_dir())
+                if skip_exist and folder_exists:
+                    logger.warning('Skipped because recording already exists')
+                    continue
+                
+                path_trajectories_to_execute.append(path)
+        if len(path_trajectories_to_execute)==0:
+            logger.error(f"'{TRJ_NAME_PATTERN[trj_type]}' not found in subfolders of: {desired_trajectory_path}")
+            exit(1)
+
+    path_trajectories_to_execute = sorted(path_trajectories_to_execute)
+    trj_executor = RobotTrajectoryExecutor(
+        robot_api, full_pinmodel, full_geommodel
+    )
+
+    now = datetime.now()
+    additional_info = "sim" if sim else ""
+    additional_info += "_load" if not (load_urdf_path is None) else ""
+    additional_info += "_"+now.strftime("%d_%m_%Y_%H_%M_%S")
+    RDCTools_logger.add_progress_bar("exec_trajectory", len(path_trajectories_to_execute), "Execute trajectories", "traj")
+    RDCTools_logger.tick_progress_bar("exec_trajectory", 0)
+    for data_path in path_trajectories_to_execute:
+        # print(data_path.name)
+        logger.info(f"Read trajectory: %s", str(data_path))
+
+        dataframe = pd.read_csv(data_path)  
+        trj = Trajectory.from_dataframe(dataframe.copy())
+
+        trj_dt = (trj.timestamp[1]-trj.timestamp[0]).numpy()
+        trj_freq = 1./trj_dt
+        robot_freq = 1./robot_api.dt
+        if refine_dt and trj_freq != robot_freq:
+            time_scale = round(trj_dt/robot_api.dt,6)
+            logger.warning(f"Trajectory has uncompatible dt. Time rescaled from trj freq: {trj_freq} to robot freq: {robot_freq}, velocity will be multiplied on: {time_scale}")
+            new_df = dataframe.copy()
+            new_df.loc[:,'timestamp'] /= time_scale
+            for i in range(trj.joint_num):
+                new_df.loc[:,f'dq_{i}'] *= time_scale
+            trj = Trajectory.from_dataframe(new_df)
+        
+        trj = times*trj
+            
+        logger.info(f"Given trajectory contain %s points. Estimated execution time: %s s", str(trj.shape[0]), str(trj.shape[0]*robot_api.dt))
+        
+        # TODO: Return check dt
+
+        recorded_desired_trajectory, recorded_trajectory = trj_executor.execute_trajectory(trj, check_dt=refine_dt, check=check)
+        
+        logger.info(f"Writing trajectories into: %s ", f"{data_path.parent}/recorded_{additional_info}")
+        Path(f"{data_path.parent}/recorded_{additional_info}").mkdir(parents=True, exist_ok=True)
+       
+        recorded_desired_trajectory.to_csv(
+                f"{data_path.parent}/recorded_{additional_info}/recorded_desired_trajectory.csv", index=False
+            )
+        
+        recorded_trajectory.to_csv(
+                f"{data_path.parent}/recorded_{additional_info}/recorded_trajectory.csv", index=False
+            )
+        
+        time.sleep(0.5)
+        RDCTools_logger.tick_progress_bar("exec_trajectory", 1)
+
+    robot_api.moveJ(start_robot_position)
+    robot_api.disconnect()
+    
+if __name__ == '__main__':
+    exec_traj()
+
+\end{lstlisting}

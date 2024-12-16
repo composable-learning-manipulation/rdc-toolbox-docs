@@ -1,0 +1,545 @@
+\begin{lstlisting}[language=python, caption=\raggedright{calibration/sensor\_calibration.py}, frame=single]
+import click
+import numpy as np
+from rdc_tools.utils import URDF_PATH
+
+
+def create_urdf_from_transform(
+    T_matrix: np.ndarray,
+    robot_name: str = "calibrated_robot",
+    base_link_name: str = "base_link",
+    tool_link_name: str = "tool_link",
+    joint_name: str = "base_to_tool_joint",
+    urdf_filename: str = "robot.urdf",
+    tool_visual_mesh: str = None,
+    tool_collision_mesh: str = None,
+    mass: float = 1.0,
+    inertia: dict = None,
+):
+    """
+    Creates a new URDF file defining a robot with a base link and a tool link
+    connected via a fixed joint, based on the provided transformation matrix.
+
+    Parameters:
+    - T_matrix (np.ndarray): 4x4 homogeneous transformation matrix.
+    - robot_name (str): Name of the robot.
+    - base_link_name (str): Name of the base link.
+    - tool_link_name (str): Name of the tool link.
+    - joint_name (str): Name of the joint connecting base to tool.
+    - urdf_filename (str): Filename to save the URDF.
+    - tool_visual_mesh (str): Path to visual mesh file for tool link.
+    - tool_collision_mesh (str): Path to collision mesh file for tool link.
+    - mass (float): Mass of the tool link in kg.
+    - inertia (dict): Inertia tensor components with keys 'ixx', 'ixy', 'ixz',
+                        'iyy', 'iyz', 'izz'. Defaults to unit inertia.
+    """
+
+    # Validate T_matrix
+    if T_matrix.shape != (4, 4):
+        raise ValueError("T_matrix must be a 4x4 numpy array.")
+
+    # Decompose T_matrix into rotation and translation
+    rotation_matrix = T_matrix[:3, :3]
+    translation = T_matrix[:3, 3]
+
+    # Convert rotation matrix to RPY angles
+    r = R.from_matrix(rotation_matrix)
+    rpy = r.as_euler("xyz", degrees=False)  # RPY in degrees for URDF
+
+    # Set default inertia if not provided
+    if inertia is None:
+        inertia = {
+            "ixx": "0.1",
+            "ixy": "0.0",
+            "ixz": "0.0",
+            "iyy": "0.1",
+            "iyz": "0.0",
+            "izz": "0.1",
+        }
+    else:
+        # Ensure all inertia components are provided
+        required_keys = ["ixx", "ixy", "ixz", "iyy", "iyz", "izz"]
+        for key in required_keys:
+            if key not in inertia:
+                raise ValueError(f"Inertia tensor missing '{key}' component.")
+
+    # Create the root <robot> element
+    robot = ET.Element("robot", name=robot_name)
+
+    # Define the base link
+    base_link = ET.SubElement(robot, "link", name=base_link_name)
+
+    # Add inertial element to base link (optional, can be customized)
+    base_inertial = ET.SubElement(base_link, "inertial")
+    ET.SubElement(base_inertial, "origin", xyz="0 0 0", rpy="0 0 0")
+    ET.SubElement(base_inertial, "mass", value="0.0")  # Massless base
+    ET.SubElement(
+        base_inertial,
+        "inertia",
+        ixx="0.0",
+        ixy="0.0",
+        ixz="0.0",
+        iyy="0.0",
+        iyz="0.0",
+        izz="0.0",
+    )
+
+    # Define the tool link
+    tool_link = ET.SubElement(robot, "link", name=tool_link_name)
+
+    # Add inertial element to tool link
+    tool_inertial = ET.SubElement(tool_link, "inertial")
+    ET.SubElement(tool_inertial, "origin", xyz="0 0 0", rpy="0 0 0")
+    ET.SubElement(tool_inertial, "mass", value=str(mass))
+    ET.SubElement(tool_inertial, "inertia", **inertia)
+
+    # Add visual element to tool link
+    tool_visual = ET.SubElement(tool_link, "visual")
+    ET.SubElement(tool_visual, "origin", xyz="0 0 0", rpy="0 0 0")
+    if tool_visual_mesh and os.path.isfile(tool_visual_mesh):
+        ET.SubElement(tool_visual, "geometry").append(
+            ET.Element("mesh", filename=tool_visual_mesh)
+        )
+    else:
+        # Default to a simple box if no mesh provided
+        geometry = ET.SubElement(tool_visual, "geometry")
+        ET.SubElement(geometry, "box", size="0.05 0.05 0.05")  # 5cm cube
+
+    # Add collision element to tool link
+    tool_collision = ET.SubElement(tool_link, "collision")
+    ET.SubElement(tool_collision, "origin", xyz="0 0 0", rpy="0 0 0")
+    if tool_collision_mesh and os.path.isfile(tool_collision_mesh):
+        ET.SubElement(tool_collision, "geometry").append(
+            ET.Element("mesh", filename=tool_collision_mesh)
+        )
+    else:
+        # Default to a simple box if no mesh provided
+        geometry = ET.SubElement(tool_collision, "geometry")
+        ET.SubElement(geometry, "box", size="0.05 0.05 0.05")  # 5cm cube
+
+    # Define the joint connecting base to tool
+    joint = ET.SubElement(robot, "joint", name=joint_name, type="fixed")
+    ET.SubElement(joint, "parent", link=base_link_name)
+    ET.SubElement(joint, "child", link=tool_link_name)
+    ET.SubElement(
+        joint,
+        "origin",
+        xyz=f"{translation[0]:.6f} {translation[1]:.6f} {translation[2]:.6f}",
+        rpy=f"{rpy[0]:.6f} {rpy[1]:.6f} {rpy[2]:.6f}",
+    )
+
+    # Create the ElementTree and write to file
+    tree = ET.ElementTree(robot)
+    ET.indent(tree, space="  ", level=0)  # For pretty-printing (Python 3.9+)
+    tree.write(urdf_filename, encoding="utf-8", xml_declaration=True)
+
+    print(f"URDF file '{urdf_filename}' has been created successfully.")
+
+
+def inverse_kinematics(model, data, pdes):
+    JOINT_ID = 6
+    oMdes = pinocchio.SE3(np.eye(3), np.array(pdes))
+
+    q = pinocchio.neutral(model)
+    eps = 1e-3
+    IT_MAX = 1000
+    DT = 1e-1
+    damp = 1e-12
+
+    i = 0
+    while True:
+        pinocchio.forwardKinematics(model, data, q)
+        dMi = oMdes.actInv(data.oMi[JOINT_ID])
+        err = pinocchio.log(dMi).vector
+        if np.linalg.norm(err) < eps:
+            success = True
+            break
+        if i >= IT_MAX:
+            success = False
+            break
+        J = pinocchio.computeJointJacobian(model, data, q, JOINT_ID)
+        v = -J.T.dot(np.linalg.solve(J.dot(J.T) + damp * np.eye(6), err))
+        q = pinocchio.integrate(model, q, v * DT)
+        # if not i % 10:
+        #     print("%d: error = %s" % (i, err.T))
+        i += 1
+    # print(f"{pdes = }")
+    if not success:
+        raise RuntimeError(
+            f"The iterative algorithm has not reached convergence to the desired precision, {np.linalg.norm(err) = }"
+        )
+    return q
+
+
+class SensorCalibration:
+    def __init__(
+        self,
+        urdf_filename,
+    ):
+        self._model = pinocchio.buildModelFromUrdf(urdf_filename)
+        self._data_for_model = self._model.createData()
+        self._data_storage_holes = {i: [] for i in range(5)}
+        self._data_storage_surface = []
+
+        for idx, frame in enumerate(self._model.frames):
+            print(f"Index: {idx}, Name: {frame.name}")
+        try:
+            self._eef_i = self._model.getFrameId("tool_end_link")
+        except pinocchio.FrameNameException:
+            raise ValueError("Frame 'link06' not found in the model.")
+
+        print(
+            f"EEF frame is {self._eef_i } -- {self._model.frames[self._eef_i].name}"
+        )
+
+    def add_data_holes(self, position_index, q):
+        pinocchio.framesForwardKinematics(self._model, self._data_for_model, q)
+        self._data_storage_holes[position_index].append(
+            self._data_for_model.oMf[self._eef_i].translation.copy()
+        )
+
+    def add_data_surface(self, q):
+        pinocchio.framesForwardKinematics(self._model, self._data_for_model, q)
+        self._data_storage_surface.append(
+            self._data_for_model.oMf[self._eef_i].translation.copy()
+        )
+
+    def _get_surface_normal_lstsq(self):
+        points = np.array(self._data_storage_surface).reshape((-1, 3))
+        x = points[:, 0]
+        y = points[:, 1]
+        z = points[:, 2]
+        ones = np.ones_like(x)
+        C = 1
+        A, B, D = np.linalg.lstsq(
+            np.column_stack((x, y, ones)), -z, rcond=None
+        )[0]
+        centroid = np.mean(points, axis=0)
+        normal_vector = np.array([A, B, C])
+        return normal_vector / np.linalg.norm(normal_vector), centroid
+
+    def _project_point_onto_plane(self, Q, P0, normal_vector):
+        Q = np.array(Q)
+        P0 = np.array(P0)
+        n = np.array(normal_vector)
+        n_norm_sq = np.dot(n, n)
+        if n_norm_sq == 0:
+            raise ValueError("Normal vector cannot be zero.")
+        vector = Q - P0
+        distance = np.dot(vector, n) / n_norm_sq
+        Q_prime = Q - distance * n
+        return Q_prime
+
+    def calib_results(self):
+        surface_normal, centroid = self._get_surface_normal_lstsq()
+        points = [
+            np.mean(
+                np.array(self._data_storage_holes[i]).reshape(-1, 3), axis=0
+            )
+            for i in range(5)
+        ]
+        points = [
+            self._project_point_onto_plane(point, centroid, surface_normal)
+            for point in points
+        ]
+        center = np.mean(points[1:], axis=0)
+        vx = points[0] - center
+        vx /= np.linalg.norm(vx)
+        # vz = surface_normal
+        vy = (points[1] + points[2]) * 0.5 - center
+        vy /= np.linalg.norm(vy)
+        vz = np.cross(vx, vy)
+        vz /= np.linalg.norm(vz)
+        print(f"vx dot vy before {np.dot(vx.flatten(), vy.flatten())}")
+        # ISSUE!!!!!!!!!
+        vy = np.cross(vz, vx)
+        vy /= np.linalg.norm(vy)
+
+        vx = vx.reshape(-1, 1)
+        vy = vy.reshape(-1, 1)
+        vz = vz.reshape(-1, 1)
+        center = center.reshape(-1, 1)
+
+        assert np.isclose(
+            np.dot(vx.flatten(), vy.flatten()), 0
+        ), f"vx and vy are not orthogonal, {np.dot(vx.flatten(), vy.flatten()) = }"
+        assert np.isclose(np.linalg.norm(vx), 1), "vx is not normalized"
+        assert np.isclose(np.linalg.norm(vy), 1), "vy is not normalized"
+        assert np.isclose(np.linalg.norm(vz), 1), "vz is not normalized"
+
+        T_matrix = np.hstack([vx, vy, vz, center])
+        T_matrix = np.vstack([T_matrix, [0, 0, 0, 1]])
+        return T_matrix
+
+
+def add_tool_link_to_urdf(
+    original_urdf,
+    updated_urdf,
+    T_matrix,
+    tool_link_name="tool_link",
+    tool_joint_name="tool_joint",
+    parent_link="link06",
+):
+    """
+    Adds a new tool link to the URDF based on the calibration transformation matrix.
+
+    Parameters:
+    - original_urdf (str): Path to the original URDF file.
+    - updated_urdf (str): Path to save the updated URDF file.
+    - T_matrix (np.ndarray): 4x4 transformation matrix from calibration.
+    - tool_link_name (str): Name of the new tool link.
+    - tool_joint_name (str): Name of the new joint connecting the tool link.
+    - parent_link (str): Name of the parent link to which the tool is attached.
+    """
+    # Parse the original URDF
+    tree = ET.parse(original_urdf)
+    root = tree.getroot()
+
+    # Check if the tool_link already exists
+    existing_links = [link.get("name") for link in root.findall("link")]
+    if tool_link_name in existing_links:
+        print(f"Link '{tool_link_name}' already exists in the URDF.")
+        return
+
+    # Create the new tool link
+    tool_link = ET.Element("link", {"name": tool_link_name})
+
+    root.append(tool_link)
+    print(f"Added new link '{tool_link_name}' to the URDF.")
+
+    joint = ET.Element(
+        "joint",
+        {
+            "name": tool_joint_name,
+            "type": "fixed",
+        },
+    )
+
+    parent = ET.SubElement(joint, "parent", {"link": parent_link})
+    child = ET.SubElement(joint, "child", {"link": tool_link_name})
+
+    rotation_matrix = T_matrix[:3, :3]
+    translation = T_matrix[:3, 3]
+
+    rpy = R.from_matrix(rotation_matrix).as_euler("xyz", degrees=False)
+
+    # Create the origin element with translation and rotation
+    origin = ET.SubElement(
+        joint,
+        "origin",
+        {
+            "xyz": f"{translation[0]:.6f} {translation[1]:.6f} {translation[2]:.6f}",
+            "rpy": f"{rpy[0]:.6f} {rpy[1]:.6f} {rpy[2]:.6f}",
+        },
+    )
+
+    root.append(joint)
+    print(
+        f"Added new joint '{tool_joint_name}' connecting '{parent_link}' to '{tool_link_name}'."
+    )
+    tree.write(updated_urdf)
+    print(f"Updated URDF saved to '{updated_urdf}'.")
+
+
+@click.command(name="ftsensor")
+@click.option(
+    "--urdf_z1",
+    default=URDF_PATH + "/z1_ee.urdf",
+    help="Original Robots urdf path",
+)
+@click.option(
+    "--urdf_z1_link_name",
+    default="link_ee",
+    help="Z1 urdf ee link_name",
+)
+@click.option(
+    "--urdf_tool",
+    default=URDF_PATH + "/tool_calib.urdf",
+    help="Tool urdf path",
+)
+@click.option(
+    "--urdf_tool_link_name",
+    default="tool_start_link",
+    help="Tool urdf start link link_name",
+)
+@click.option(
+    "--upd_urdf",
+    default=URDF_PATH + "/z1_tool.urdf",
+    help="Updated urdf path",
+)
+@click.option(
+    "--urdf_sensor",
+    default=URDF_PATH + "/sensor.urdf",
+    help="Updated urdf with sensor path",
+)
+@click.option(
+    "--pitch_deg",
+    default=0,
+    type=float,
+    help="Updated urdf with sensor path",
+)
+@click.option(
+    "--roll_deg",
+    default=0,
+    type=float,
+    help="Updated urdf with sensor path",
+)
+@click.option("--synth", default=False, is_flag=True, help="Synth data flag")
+def sensor_calibration(
+    urdf_z1,
+    urdf_z1_link_name,
+    urdf_tool,
+    urdf_tool_link_name,
+    upd_urdf,
+    urdf_sensor,
+    pitch_deg,
+    roll_deg,
+    synth,
+):
+    """Calibrating the force-sensor TF
+
+    The program can be used to estimate
+    the origin and rotation of the force sensor
+    corresponding to the world coordinate system.
+    """
+    global np, ET, R, pinocchio, merge_urdfs_with_fixed_joint, URDF_PATH
+    import numpy as np
+    import xml.etree.ElementTree as ET
+    from scipy.spatial.transform import Rotation as R
+    import pinocchio
+    from rdc_toolbox.utils.pinocchio import merge_urdfs_with_fixed_joint
+    from rdc_tools.calibrations.platform_kinematics import PlatformKinematics
+
+    merge_urdfs_with_fixed_joint(
+        urdf_z1,
+        urdf_tool,
+        urdf_z1_link_name,
+        urdf_tool_link_name,
+        upd_urdf,
+    )
+    if synth:
+        model = pinocchio.buildModelFromUrdf(upd_urdf)
+        data = model.createData()
+
+        x_max = 0.3
+        x_min = 0.25
+        y_max = 0.32
+        y_min = 0.28
+        z_height = 0
+        p0 = inverse_kinematics(
+            model,
+            data,
+            [
+                x_max + 0.01,
+                (y_max + y_min) * 0.5,
+                z_height + (np.random.rand() - 0.5) * 5 / 1000,
+            ],
+        )
+        p1 = inverse_kinematics(
+            model,
+            data,
+            [x_max, y_max, z_height + (np.random.rand() - 0.5) * 5 / 1000],
+        )
+        p2 = inverse_kinematics(
+            model,
+            data,
+            [x_min, y_max, z_height + (np.random.rand() - 0.5) * 5 / 1000],
+        )
+        p3 = inverse_kinematics(
+            model,
+            data,
+            [x_min, y_min, z_height + (np.random.rand() - 0.5) * 5 / 1000],
+        )
+        p4 = inverse_kinematics(
+            model,
+            data,
+            [x_max, y_min, z_height + (np.random.rand() - 0.5) * 5 / 1000],
+        )
+        qs = [p0, p1, p2, p3, p4]
+
+        qs_surface = [
+            inverse_kinematics(
+                model,
+                data,
+                [
+                    0.275 + (np.random.rand() - 0.5) / 10,
+                    0.3 + (np.random.rand() - 0.5) / 10,
+                    0 + (np.random.rand() - 0.5) * 2 / 1000,
+                ],
+            )
+            for _ in range(10)
+        ]
+    else:
+        from rdc_toolbox.execution.robots import (
+            Z1RobotAPI,
+        )
+
+        model = pinocchio.buildModelFromUrdf(upd_urdf)
+        data = model.createData()
+        sim_robot = Z1RobotAPI(gripper=False, pinmodel=model)
+        sim_robot.connect()
+        sim_robot.teach_on()
+
+    calib = SensorCalibration(upd_urdf)
+    print("Go from the top one in anti-clockwise direction")
+    for i in range(5):
+        print("====================")
+        print(f"Go to position {i}.")
+        print("   0   \n1     4\n\n2     3")
+        while True:
+            try:
+                if not synth:
+                    input(
+                        "Press <enter> to record data; ctrl-c to move to the next point."
+                    )
+                    q = sim_robot.q.numpy()
+                    calib.add_data_holes(i, q)
+                else:
+                    for _ in range(10):
+                        calib.add_data_holes(i, qs[i])
+                    raise KeyboardInterrupt
+            except KeyboardInterrupt as e:
+                if i < 4:
+                    print("Move to next point")
+                else:
+                    print("Holes data collection finished")
+                break
+
+    print("Collect 10 data point from flat surface of the sensor")
+    for i in range(10):
+        if not synth:
+            input("Press <enter> to record data")
+            q = sim_robot.q.numpy()
+            calib.add_data_surface(q)
+        else:
+            calib.add_data_surface(qs_surface[i])
+
+    print("TF matrix to force_sensor:")
+    T_matrix = calib.calib_results()
+
+    pk = PlatformKinematics()
+    create_urdf_from_transform(
+        T_matrix=pk.forward_kinematics(pitch_deg, roll_deg) @ T_matrix,
+        robot_name="calibrated_sensor",
+        base_link_name="platform_base",
+        tool_link_name="sensor_link",
+        joint_name="platform_base_to_sensor_link_joint",
+        urdf_filename=urdf_sensor,
+        tool_visual_mesh=None,  # Provide path if available
+        tool_collision_mesh=None,  # Provide path if available
+        mass=1.0,
+        inertia={
+            "ixx": "0.01",
+            "ixy": "0.0",
+            "ixz": "0.0",
+            "iyy": "0.01",
+            "iyz": "0.0",
+            "izz": "0.01",
+        },
+    )
+
+
+if __name__ == "__main__":
+    sensor_calibration()
+    
+\end{lstlisting}

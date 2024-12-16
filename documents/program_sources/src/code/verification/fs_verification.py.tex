@@ -1,0 +1,554 @@
+\begin{lstlisting}[language=python, caption=\raggedright{verification/fs\_verification.py}, frame=single]
+import click
+from rdc_tools.utils import URDF_PATH, DATA_PATH
+
+
+@click.command(name="wrenches")
+@click.option(
+    "--urdf_system",
+    default=URDF_PATH + "/z1_tool.urdf",
+    help="System (robot + ft sensor) urdf path",
+)
+@click.option(
+    "--rdc_path",
+    default="rdc_model_new.rdcm",
+    help="Path to rdc model",
+)
+@click.option(
+    "--num_poses",
+    default=1,
+    help="The ammount of poses to collect",
+)
+@click.option(
+    "--tool_link_name",
+    default="tool_end_link",
+    help="The name of tool link in urdf",
+)
+@click.option(
+    "--ft_transform_urdf",
+    default=URDF_PATH + "/sensor.urdf",
+    help="Urdf with transform from platform to sensor",
+)
+@click.option(
+    "--ft_link_name",
+    default="sensor_link",
+    help="The name of sensor link in urdf",
+)
+@click.option(
+    "--roll_angle",
+    default=0.0,
+    prompt="Platform's roll angle (deg)",
+)
+@click.option(
+    "--pitch_angle",
+    default=0.0,
+    prompt="Platforms's pitch angle (deg)",
+)
+@click.option(
+    "--save_data",
+    default=False,
+    help="Save or not the collected data (csv file will be created)",
+)
+@click.option(
+    "--approaching_speed",
+    default=0.005,
+    help="Speed for moving in the specified pose",
+)
+@click.option(
+    "--max_force",
+    default=60.0,
+    help="The maximum force applied to sensor",
+)
+def wrenches(
+    urdf_system,
+    rdc_path,
+    num_poses,
+    tool_link_name,
+    ft_transform_urdf,
+    ft_link_name,
+    roll_angle,
+    pitch_angle,
+    save_data,
+    approaching_speed,
+    max_force,
+):
+    # Imports in function to speed up while using olny "help" command
+    import warnings
+    from NetFT import Sensor
+    import numpy as np
+    import copy
+    from rdc_toolbox.execution.robots import (
+        Z1RobotAPI,
+    )
+    import eagerpy as ep
+    from rdc_toolbox.model.cartesian import (
+        compute_wrench_from_torques,
+        compute_wrench_from_forces,
+        change_wrench_basis,
+    )
+    from rdc_toolbox.utils import get_pinocchio_models_from_description
+    from rdc_toolbox.model import BaseRDCModel
+    import datetime, time
+    import matplotlib.pyplot as plt
+    import pinocchio as pin
+    from pytransform3d.urdf import UrdfTransformManager
+    from rdc_tools.calibrations.platform_kinematics import PlatformKinematics
+    import pandas as pd
+    from pytransform3d import rotations as pr
+    from rdc_toolbox.data_processing.offline_filtration import get_filtred
+
+    warnings.filterwarnings("ignore")
+
+    # Get basic objects
+    pinmodel, _, _ = get_pinocchio_models_from_description(urdf_system)
+    pindata = pinmodel.createData()
+
+    tm = UrdfTransformManager()
+    with open(ft_transform_urdf, "r") as f:
+        tm.load_urdf(f.read())
+    platform_kin = PlatformKinematics()
+    transform_base_platform = pin.SE3(
+        platform_kin.forward_kinematics(pitch_angle, roll_angle)
+    )
+    transform_platform_ft = pin.SE3(
+        tm.get_transform("platform_base", ft_link_name)
+    )
+    transform_robot_base_ft = transform_platform_ft * transform_base_platform
+
+    z1_robot = Z1RobotAPI(gripper=False, pinmodel=pinmodel)
+    rdc_model = BaseRDCModel.load(rdc_path)
+
+    # TODO: error when cannot connect
+    sensor_ip = "192.168.1.9"
+    sensor = Sensor(sensor_ip)
+
+    HOLES = np.array(
+        [
+            [0.0, 0.0, 0.04464],  # Center
+            [0.01237, 0.0, 0.03732],  # front
+            [0.075, 0.0, 0.04464],
+            [0.09268, 0.0, 0.03732],
+            [0.075, 0.01768, 0.03732],
+            [0.09024, 0.01768, 0.03488],
+            [0.075, -0.01768, 0.03732],
+            [0.09024, -0.01768, 0.03488],
+            [-0.01237, 0.0, 0.03732],  # back
+            [-0.075, 0.0, 0.04464],
+            [-0.09268, 0.0, 0.03732],
+            [-0.075, 0.01768, 0.03732],
+            [-0.09024, 0.01768, 0.03488],
+            [-0.075, -0.01768, 0.03732],
+            [-0.09024, -0.01768, 0.03488],
+            [0.0, 0.01237, 0.03732],  # left
+            [0.0, 0.075, 0.04464],
+            [0.0, 0.09268, 0.03732],
+            [0.01768, 0.075, 0.03732],
+            [0.01768, 0.09024, 0.03488],
+            [-0.01768, 0.075, 0.03732],
+            [-0.01768, 0.09024, 0.03488],
+            [0.0, -0.01237, 0.03732],  # right
+            [0.0, -0.075, 0.04464],
+            [0.0, -0.09268, 0.03732],
+            [0.01768, -0.075, 0.03732],
+            [0.01768, -0.09024, 0.03488],
+            [-0.01768, -0.075, 0.03732],
+            [-0.01768, -0.09024, 0.03488],
+            [0.01090, 0.01090, 0.03488],  # inner corners
+            [-0.01090, 0.01090, 0.03488],
+            [0.01090, -0.01090, 0.03488],
+            [-0.01090, -0.01090, 0.03488],
+            [0.1, 0.0, 0.015],  # low front
+            [0.075, 0.025, 0.015],
+            [0.075, -0.025, 0.015],
+            [0.09268, 0.01768, 0.015],
+            [0.09268, -0.01768, 0.015],
+            [-0.1, 0.0, 0.015],  # low back
+            [-0.075, 0.025, 0.015],
+            [-0.075, -0.025, 0.015],
+            [-0.09268, 0.01768, 0.015],
+            [-0.09268, -0.01768, 0.015],
+            [0.0, 0.1, 0.015],  # low right
+            [0.025, 0.075, 0.015],
+            [-0.025, 0.075, 0.015],
+            [0.01768, 0.09268, 0.015],
+            [-0.01768, 0.09268, 0.015],
+            [0.0, -0.1, 0.015],  # low left
+            [0.025, -0.075, 0.015],
+            [-0.025, -0.075, 0.015],
+            [0.01768, -0.09268, 0.015],
+            [-0.01768, -0.09268, 0.015],
+        ]
+    )
+
+    # Declare subfunctions
+    def choose_movement(speed):
+        MOVEMENTS = {
+            "tool forward": [[0.0, 0.0, speed, 0.0, 0.0, 0.0], "tool"],
+            "base down (z-)": [[0.0, 0.0, -speed, 0.0, 0.0, 0.0], "base"],
+            "base forward (x+)": [[speed, 0.0, 0.0, 0.0, 0.0, 0.0], "base"],
+            "base backward (x-)": [[-speed, 0.0, 0.0, 0.0, 0.0, 0.0], "base"],
+            "base left (y+)": [[0.0, speed, 0.0, 0.0, 0.0, 0.0], "base"],
+            "base right (y-)": [[0.0, -speed, 0.0, 0.0, 0.0, 0.0], "base"],
+        }
+        click.echo("Available movements:")
+        for i, mv in enumerate(MOVEMENTS.keys()):
+            print(f"{i+1}. {mv}")
+        return list(MOVEMENTS.values())[
+            click.prompt("Choose movement:", default=1) - 1
+        ]
+
+    def collect_data(
+        _time_data,
+        _tau_data,
+        _q_data,
+        _dq_data,
+        _ddq_data,
+        _real_wrench_data_ft,
+    ):
+        _time_data.append(time.time())
+        _tau_data.append(copy.deepcopy(z1_robot.tau))
+        _q_data.append(copy.deepcopy(z1_robot.q))
+        _dq_data.append(copy.deepcopy(z1_robot.dq))
+        _ddq_data.append(copy.deepcopy(z1_robot.ddq))
+        _ft_measurement = np.array(sensor.getMeasurement()) / 1.0e6
+        _real_wrench_data_ft.append(_ft_measurement)
+        return _ft_measurement
+
+    def shift_data(
+        shift,
+        _time_data,
+        _tau_data,
+        _q_data,
+        _dq_data,
+        _ddq_data,
+        _real_wrench_data_ft,
+    ):
+        shift_idx = int(np.where(_time_data >= _time_data[0] + shift)[0][0])
+        _time_data = _time_data[shift_idx:]
+        _time_data -= _time_data[0]
+
+        _real_wrench_data_ft = _real_wrench_data_ft[shift_idx:]
+
+        _tau_data = _tau_data[:-shift_idx]
+        _q_data = _q_data[:-shift_idx]
+        _dq_data = _dq_data[:-shift_idx]
+        _ddq_data = _ddq_data[:-shift_idx]
+
+        return (
+            _time_data,
+            _tau_data,
+            _q_data,
+            _dq_data,
+            _ddq_data,
+            _real_wrench_data_ft,
+        )
+
+    def filter_data(times, qs, dqs, ddqs, taus):
+        df = []
+        for j in range(len(qs)):
+            df.append(
+                np.concatenate(
+                    [
+                        qs[j].numpy(),
+                        dqs[j].numpy(),
+                        ddqs[j].numpy(),
+                        taus[j].numpy(),
+                    ]
+                )
+            )
+        df = np.array(df)
+        df = pd.DataFrame(
+            df,
+            columns=[f"q_{k}" for k in range(len(qs[0]))]
+            + [f"dq_{k}" for k in range(len(dqs[0]))]
+            + [f"ddq_{k}" for k in range(len(ddqs[0]))]
+            + [f"tau_{k}" for k in range(len(taus[0]))],
+        )
+        df["timestamp"] = times
+
+        df = get_filtred(
+            data_in=df,
+            names=["dq"],
+            graph=[False, False],
+            filter_type="butterworth",
+            dt=0.002,
+            order=6,
+            cutoff_hz=0.75,
+        )
+        for i in range(0, 6):
+            df[f"ddq_{i}"] = np.gradient(df[f"dq_{i}"], df["timestamp"])
+        for i in range(pinmodel.nq):
+            df.loc[df[f"dq_{i}"].abs() < 0.01, f"dq_{i}"] = 0
+
+        df = get_filtred(
+            data_in=df,
+            names=["q", "ddq", "tau"],
+            graph=[False, False],
+            filter_type="butterworth",
+            dt=0.002,
+            order=6,
+            cutoff_hz=0.75,
+        )
+
+        return (
+            df.loc[:, "q_0":"q_5"].to_numpy(),
+            df.loc[:, "dq_0":"dq_5"].to_numpy(),
+            df.loc[:, "ddq_0":"ddq_5"].to_numpy(),
+            df.loc[:, "tau_0":"tau_5"].to_numpy(),
+        )
+
+    def save_data_csv(ts, qs, dqs, ddqs, taus, real, estim):
+
+        df = []
+        for j in range(len(qs)):
+            df.append(
+                np.concatenate(
+                    [
+                        np.array([ts[j]]),
+                        qs[j],
+                        dqs[j],
+                        dqs[j],
+                        taus[j],
+                        real[j],
+                        estim[j],
+                    ]
+                )
+            )
+        df = np.array(df)
+        pd.DataFrame(
+            df,
+            columns=["time"]
+            + [f"q_{k}" for k in range(len(qs[0]))]
+            + [f"dq_{k}" for k in range(len(dqs[0]))]
+            + [f"ddq_{k}" for k in range(len(ddqs[0]))]
+            + [f"tau_{k}" for k in range(len(taus[0]))]
+            + [f"real_ft_{k}" for k in range(len(real[0]))]
+            + [f"estim_ft_{k}" for k in range(len(real[0]))],
+        ).to_csv(
+            str(
+                datetime.datetime.now().strftime(
+                    DATA_PATH
+                    + "/wrench_verification/"
+                    + "fs_verification_sensor_%d_%m_%Y__%H:%M:%S"
+                )
+            )
+            + ".csv"
+        )
+
+    def verify_and_plot(real, estimated, time_data):
+        click.echo(f"MSE: {np.mean((estimated - real) ** 2, 0)}")
+        fig, ax = plt.subplots(2, 3, figsize=(14, 8))
+        fig.suptitle(ft_link_name)
+        for i in range(6):
+            ax[i // 3][i % 3].plot(
+                time_data, estimated[:, i], label="estimated"
+            )
+            ax[i // 3][i % 3].plot(
+                time_data, real[:, i], label="sensor", c="r"
+            )
+            ax[i // 3][i % 3].grid()
+            ax[i // 3][i % 3].legend()
+            ax[i // 3][i % 3].set_title(
+                f"{['force', 'torque'][i // 3]}_{['x', 'y', 'z'][i%3]} [{['N', 'Nm'][i // 3]}]"
+            )
+            ax[i // 3][i % 3].set_xlabel("time, s")
+        plt.show()
+
+    # Verification
+    click.echo(
+        f"Record {num_poses} poses with tool placed normal to the specified surface."
+    )
+
+    for i in range(num_poses):
+        # Setup robot & sensor
+        sensor.tare()
+        z1_robot.connect()
+        start_position = copy.deepcopy(z1_robot.q)
+        z1_robot.teach_on()
+
+        # Choose application position
+        if not click.confirm(
+            f"Pose {i+1}/{num_poses}. Set the robot in the desired verification position. Continue?",
+            default=True,
+        ):
+            return
+
+        # Calculate nearest position
+        pin.framesForwardKinematics(pinmodel, pindata, z1_robot.q.numpy())
+        transform_application_robot_base = pindata.oMf[
+            pinmodel.getFrameId(tool_link_name)
+        ]
+        transform_application_ft = (
+            transform_robot_base_ft * transform_application_robot_base
+        )
+        nearest_hole = HOLES[
+            np.argmin(
+                np.linalg.norm(
+                    HOLES - transform_application_ft.translation, axis=1
+                )
+            )
+        ]
+        J = pin.computeFrameJacobian(
+            pinmodel,
+            pindata,
+            z1_robot.q.numpy(),
+            pinmodel.getFrameId(tool_link_name),
+            pin.ReferenceFrame.WORLD,
+        )
+        click.echo(
+            f"Nearest available position (ft frame): {nearest_hole}. Jacobian condition number: {np.linalg.cond(J)}."
+        )
+
+        # Fix robot
+        z1_robot.teach_off()
+
+        # Experiment setup
+        ft_measurement = np.zeros(6)
+        real_wrench_data_ft = []
+        tau_data = []
+        q_data = []
+        dq_data = []
+        ddq_data = []
+        time_data = []
+
+        # Specify movement
+        vel, fr = choose_movement(approaching_speed)
+        vel = ep.astensor(np.array(vel))
+
+        # Start experiments
+        click.echo("Collecting data...")
+        for _ in range(3):
+
+            while np.linalg.norm(ft_measurement[:3]) < max_force:
+                ft_measurement = collect_data(
+                    time_data,
+                    tau_data,
+                    q_data,
+                    dq_data,
+                    ddq_data,
+                    real_wrench_data_ft,
+                )
+                z1_robot.control_loop_operational_space(
+                    None,
+                    vel,
+                    frame_name=tool_link_name,
+                    reference_frame=pin.LOCAL if fr == "tool" else pin.WORLD,
+                )
+
+            while np.linalg.norm(ft_measurement[:3]) > 5:
+                ft_measurement = collect_data(
+                    time_data,
+                    tau_data,
+                    q_data,
+                    dq_data,
+                    ddq_data,
+                    real_wrench_data_ft,
+                )
+                z1_robot.control_loop_operational_space(
+                    None,
+                    -vel,
+                    frame_name=tool_link_name,
+                    reference_frame=pin.LOCAL if fr == "tool" else pin.WORLD,
+                )
+
+        # Go back from application position
+        # TODO: remake with moveL
+        click.echo("Done! Going to home position...")
+        start_time = time.time()
+        while time.time() - start_time < 5:
+            z1_robot.control_loop_operational_space(
+                None,
+                ep.astensor(np.array([0.0, 0.0, -0.01, 0.0, 0.0, 0.0])),
+                frame_name=tool_link_name,
+                reference_frame=pin.LOCAL,
+            )
+        z1_robot.moveJ(start_position)
+        z1_robot.disconnect()
+
+        # Data proccessing
+        click.echo("Proccessing data...")
+        time_data = np.array(time_data)
+        time_data -= time_data[0]
+        real_wrench_data_ft = np.array(real_wrench_data_ft)
+
+        # shifting due to sensor delay
+        time_data, tau_data, q_data, dq_data, ddq_data, real_wrench_data_ft = (
+            shift_data(
+                0.2,
+                time_data,
+                tau_data,
+                q_data,
+                dq_data,
+                ddq_data,
+                real_wrench_data_ft,
+            )
+        )
+
+        # Filtering
+        q_data, dq_data, ddq_data, tau_data = filter_data(
+            time_data, q_data, dq_data, ddq_data, tau_data
+        )
+
+        # Estimating
+        estimated_wrench_data_ft = []
+        for tau_i in range(len(tau_data)):
+            pin.framesForwardKinematics(pinmodel, pindata, q_data[tau_i])
+            transform_application_robot_base = pindata.oMf[
+                pinmodel.getFrameId(tool_link_name)
+            ]
+            transform_application_ft = (
+                transform_robot_base_ft * transform_application_robot_base
+            )
+
+            wrench_application = compute_wrench_from_torques(
+                rdc_model,
+                pinmodel,
+                ep.astensor(tau_data[tau_i]),
+                ep.astensor(q_data[tau_i]),
+                ep.astensor(dq_data[tau_i]),
+                ep.astensor(ddq_data[tau_i]),
+                force_application_frame=tool_link_name,
+                basis_frame=tool_link_name,
+                base_orient=ep.astensor(
+                    pr.matrix_from_euler(
+                        [np.deg2rad(roll_angle), np.deg2rad(pitch_angle), 0.0],
+                        0,
+                        1,
+                        2,
+                        True,
+                    )
+                ),
+            )
+
+            # wrench_ft = change_wrench_basis(
+            #     wrench_application,
+            #     pin.SE3(transform_application_ft.rotation, nearest_hole),
+            # )
+            wrench_ft = change_wrench_basis(
+                wrench_application, transform_application_ft
+            )
+            estimated_wrench_data_ft.append(wrench_ft.numpy())
+        estimated_wrench_data_ft = np.array(estimated_wrench_data_ft)
+
+        # Save data
+        if save_data:
+            save_data_csv(
+                time_data,
+                q_data,
+                dq_data,
+                ddq_data,
+                tau_data,
+                real_wrench_data_ft,
+                estimated_wrench_data_ft,
+            )
+
+        # Output results
+        verify_and_plot(
+            real_wrench_data_ft, estimated_wrench_data_ft, time_data
+        )
+
+
+if __name__ == "__main__":
+    wrenches()
+
+\end{lstlisting}

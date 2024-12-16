@@ -1,0 +1,364 @@
+\begin{lstlisting}[language=python, caption=\raggedright{generation/gen\_trajectory\_fourier.py}, frame=single]
+import os
+import click
+import itertools
+import numpy as np
+import logging
+from datetime import datetime
+from rdc_tools.utils import CONFIG_PATH, URDF_PATH
+
+
+@click.command(
+    name="fourier",
+    help=R"""Run the Fourier-based trajectory optimization for a serial robot manipulator.
+    
+    Example usage:
+
+    rdc gen fourier --pipeline_name pipeline_no_load --output_path ./data/base_trj --save_plots
+    
+    """,
+)
+@click.option(
+    "--config_path",
+    show_default=True,
+    default=os.path.join(
+        CONFIG_PATH, "fourier_trajectory_optimization_pipelines.yaml"
+    ),
+    help="Config file path contains optimization pipeline settings.",
+)
+@click.option(
+    "--pipeline_name",
+    show_default=True,
+    default="",
+    help="Specific pipeline to execute. If it's empty, run all pipelines.",
+)
+@click.option(
+    "--output_path",
+    show_default=True,
+    default="./data/base_trj",
+    help="Directory to save output trajectories.",
+)
+@click.option(
+    "--save_plots",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Save additional plots and logs.",
+)
+def gen_traj_fourier(
+    config_path,
+    pipeline_name,
+    output_path,
+    save_plots,
+):
+    from rdc_toolbox.utils import (
+        gen_dataset,
+        parse_dataset,
+    )
+    from rdc_toolbox.model import PinocchioRegressionRDCModel
+    from rdc_toolbox.solver import get_matrices_for_reduction
+    from robot_descriptions.loaders.pinocchio import load_robot_description
+    from rdc_toolbox.trajectory.fourier_based.optimizer import OptimizerFactory
+    from rdc_toolbox.trajectory.fourier_based.fourier_series import (
+        FourierSeries,
+    )
+    from rdc_toolbox.trajectory.fourier_based.problems import (
+        SerialManipulatorOptimizationProblem,
+    )
+    from rdc_toolbox.trajectory.fourier_based.logger import OptimizationLogger
+    from rdc_toolbox.trajectory.fourier_based.utils import (
+        PlotterUtils,
+        RobotUtils,
+        load_config,
+    )
+
+    logger = logging.getLogger()
+    logging.getLogger().setLevel(logging.INFO)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s]: %(message)s')
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+
+    def merge_configs(defaults, specific):
+        """Merge default settings with pipeline-specific overrides."""
+        return {
+            **defaults,
+            **{
+                k: (
+                    merge_configs(defaults.get(k, {}), v)
+                    if isinstance(v, dict)
+                    else v
+                )
+                for k, v in specific.items()
+            },
+        }
+
+    def generate_combinations(config):
+        """Generate defaults settings
+        + pipline-specific overrides
+        + for each num_hurmonics and period in lists
+        """
+        defaults = config.get("default_settings", {})
+        pipelines = config.get("pipelines", [])
+
+        for pipeline in pipelines:
+            base_config = merge_configs(defaults, pipeline)
+
+            num_harmonics = base_config["fourier"].get("num_harmonics", [])
+            periods = base_config["fourier"].get("period", [])
+            for nh, period in itertools.product(num_harmonics, periods):
+                yield {
+                    **base_config,
+                    "fourier": {
+                        **base_config["fourier"],
+                        "num_harmonics": nh,
+                        "period": period,
+                    },
+                }
+
+    def run_optimization(robot, problem, pipeline, save_plots, output_path):
+        optimizer = OptimizerFactory().create_optimizer(**pipeline["solver"])
+
+        opt_logger = None
+        if save_plots:
+            log_config = pipeline["logger_config"]
+            opt_logger = OptimizationLogger(
+                directory=f"{output_path}/{log_config['directory']}",
+                filename_pattern=log_config["pattern"],
+            )
+
+        num_harmonics = pipeline["fourier"]["num_harmonics"]
+
+        bounds = np.hstack(
+            [
+                np.asarray([pipeline["solver"]["x_bounds"]["b0"]]).T,
+                np.tile(
+                    pipeline["solver"]["x_bounds"]["b1"], (num_harmonics, 1)
+                ).T,
+                np.tile(
+                    pipeline["solver"]["x_bounds"]["b2"], (num_harmonics, 1)
+                ).T,
+            ]
+        )
+
+        # Initial guess.
+        x_0 = pipeline["fourier"].get("x_0")
+        if x_0 is None:
+            x_0 = np.random.uniform(
+                bounds[0], bounds[1], size=(robot.nq, 2 * num_harmonics + 1)
+            ).flatten()
+            logger.info("Use random initial guess.")
+
+        # Helper: plot results.
+        def plot_func(obj, coefficients, path, plot_harmonics=False):
+            q, dq, ddq, times = obj.generator.generate_trajectory(
+                obj.dt, coefficients
+            )
+            PlotterUtils.plot_serialrobot(
+                q,
+                dq,
+                ddq,
+                times,
+                file_name=path.replace(".log", "_cspace.pdf"),
+                limits=np.vstack([obj.q_low, obj.q_up, obj.dq_up, obj.ddq_up])[
+                    :, : obj.model.nq
+                ].tolist(),
+            )
+            PlotterUtils.plot_cart(
+                RobotUtils.compute_forward_kinematics_xyz(
+                    obj, q, **{frame: frame for frame in pipeline["ee_frames"]}
+                ),
+                file_name=path.replace(".log", "_cartspace.pdf"),
+            )
+
+            if plot_harmonics:
+                cf = obj.generator._pack_amplitude_and_phase(
+                    obj.generator.theta
+                )
+                a0, A, phi = np.split(
+                    cf, [1, obj.generator.num_harmonics + 1], axis=1
+                )
+                for i, (a, b, c) in enumerate(zip(a0, A, phi), start=1):
+                    PlotterUtils.plot_fourier(
+                        a,
+                        b,
+                        c,
+                        np.arange(1, obj.generator.num_harmonics + 1)
+                        * obj.generator.omega_0,
+                        times,
+                        obj.generator.omega_0,
+                        file_name=path.replace(".log", f"_harmonics_q{i}.pdf"),
+                    )
+
+        result = optimizer.solve(
+            obj_class=problem,
+            x0=x_0,
+            bounds=np.tile(bounds, robot.nq).T,
+            eq_cons=pipeline["solver"].get("eq_cons"),
+            ineq_cons=pipeline["solver"].get("ineq_cons"),
+            logger=opt_logger,
+            plot_func=plot_func,
+        )
+
+        return result
+
+    logger.info("Loading pipelines config file...")
+
+    config = load_config(config_path)
+
+    # Generate combinations (for each nums_harmonics each base frequencies) and iterate through its.
+    for pipeline in generate_combinations(config):
+
+        # Choose pipeline if specified one.
+        if pipeline_name:
+            if pipeline_name != pipeline["name"]:
+                continue
+
+        logger.info(
+            f"Run pipeline:\n{pipeline['name']}\nSettings: {pipeline['fourier']}"
+        )
+
+        output_path_local = f"{output_path}/{pipeline['robot_description']}/"
+        logger.info(f"Data will be saved to {output_path_local}")
+
+        logger.info(f"Loading robot {pipeline['robot_description']}")
+        robot = load_robot_description(pipeline["robot_description"])
+
+        logger.info("Generating projection matrix...")
+        rdc_model = PinocchioRegressionRDCModel(robot.model)
+        dataset = gen_dataset(
+            robot.model, omega_0=1, n_harmonics=10, tot_time=60, hz=500
+        )
+        ts, qs, dqs, ddqs, taus = parse_dataset(dataset).values()
+        Y_dash = np.vstack(
+            [
+                rdc_model.compute_regressor(q, dq, ddq, t).numpy()
+                for t, q, dq, ddq in zip(ts, qs, dqs, ddqs)
+            ]
+        )
+        tau_dash = np.vstack([tau.numpy().reshape(-1, 1) for tau in taus])
+        P_b, __ = get_matrices_for_reduction(
+            regressor=Y_dash,
+            output=tau_dash,
+            method="svd",
+        )
+        logger.info(f"Projection matrix shape = {P_b.shape}")
+
+        if tool_desc := pipeline.get("tool_description"):
+            logger.info(
+                f"Attaching tool {URDF_PATH + '/' + tool_desc['tool_urdf_path']}"
+            )
+            robot.model, robot.collision_model, __ = (
+                RobotUtils.append_tool_to_robot(
+                    robot,
+                    URDF_PATH + "/" + tool_desc["tool_urdf_path"],
+                    URDF_PATH + "/" + tool_desc["tool_mesh_path"],
+                    tool_desc["attachment_frame_name"],
+                )
+            )
+
+        logger.info(
+            f"Creating fourier generator: num_harmonics: {pipeline['fourier']['num_harmonics']}, omega_0: {2 * np.pi / pipeline['fourier']['period']}"
+        )
+        generator = FourierSeries(
+            num_harmonics=pipeline["fourier"]["num_harmonics"],
+            omega_0=2 * np.pi / pipeline["fourier"]["period"],
+            coefficients_format=FourierSeries.CoefficientFormat.REAL_AND_IMAGINARY,
+        )
+
+        logger.info(f"Creating problem.")
+        # Compute new dt relative desired quantity points in trajectory
+        pipeline["solver"]["dt"] = (
+            pipeline["fourier"]["period"]
+            / pipeline["solver"]["num_points_for_period"]
+        )
+        problem = SerialManipulatorOptimizationProblem(
+            generator,
+            robot,
+            P_b,
+            dt=pipeline["solver"]["dt"],
+            active_collision_pairs=pipeline["active_collision_pairs"],
+            position_limits_scale=pipeline["position_limits_scale"],
+            velocity_limits=pipeline["velocity_limits"],
+            acceleration_limits=pipeline["acceleration_limits"],
+            **{frame: frame for frame in pipeline["ee_frames"]},
+        )
+
+        logger.info(f"Optimization start. Please wait...")
+        try:
+            # Multistart like optimization.
+
+            # Saving constraints to buffers and than add by one.
+            eqcons_buff = pipeline["solver"]["eq_cons"]
+            pipeline["solver"]["eq_cons"] = []
+
+            ineqcons_buff = pipeline["solver"]["ineq_cons"]
+            pipeline["solver"]["ineq_cons"] = []
+
+            for cons in ineqcons_buff:
+                pipeline["solver"]["ineq_cons"].append(cons)
+                result = run_optimization(
+                    robot, problem, pipeline, False, output_path_local
+                )
+                pipeline["fourier"][
+                    "x_0"
+                ] = (
+                    result.x.flatten()
+                )  # Modify pipeline with new initial guess.
+
+            # Adding fixed ends for velocities and accelerations.
+            pipeline["solver"]["eq_cons"] = eqcons_buff
+            result = run_optimization(
+                robot, problem, pipeline, save_plots, output_path_local
+            )
+
+        except Exception as e:
+            print(
+                f"Problem in solver. Error message:\n{e}\nContinue with next pipeline..."
+            )
+            continue
+
+        # Save result trajectory to .csv if
+        # - constraints is satisfied,
+        # - condition number less then 1000.
+
+        constraints = (
+            [999]
+            if not (ineq_cons := pipeline["solver"].get("ineq_cons"))
+            else np.concatenate(
+                [
+                    problem.__getattribute__(constr)(result.x)
+                    for constr in ineq_cons
+                ],
+                axis=None,
+            )
+        )
+
+        if (
+            np.min(constraints) < 0
+            or (problem.objective_function(result.x, augmented=False)) > 1000
+        ):
+            continue
+
+        trajtypes = iter(["slow", "warmup"])
+
+        for dt in pipeline["save_config"]["dt"]:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            trajtype = next(trajtypes, "nominal") if dt >= 0.002 else "nominal"
+            q, dq, ddq, times = problem.generator.generate_trajectory(
+                dt, result.x
+            )
+            file_name = "{timestamp}/{trajtype}_trajectory.csv".format(
+                **{"trajtype": trajtype, "timestamp": timestamp}
+            )
+            RobotUtils.save_trajectory_to_csv(
+                q, dq, ddq, times, filename=f"{output_path_local}/{file_name}"
+            )
+
+
+if __name__ == "__main__":
+    gen_traj_fourier()
+
+\end{lstlisting}

@@ -13,17 +13,19 @@ SET(parts
     ../algo.tex
     src/аннотация.tex
     # src/листинг.tex
-    src/code/mcu-libs/Matrix.h.tex
-    src/code/mcu-libs/Matrix.cpp.tex
-    src/code/mcu-libs/RLS.h.tex
-    src/code/mcu-libs/RLS.cpp.tex
+    src/code/calibration/sensor_calibration.py.tex
+    src/code/calibration/tool_calibration.py.tex
+
+    src/code/execution/exec_trajectory.py.tex
+
+    src/code/generation/gen_trajectory_friction.py.tex
+    src/code/generation/gen_trajectory_fourier.py.tex
+
+    src/code/identification/friction.py.tex
+    src/code/identification/full.py.tex
     
-    src/code/dsp_rfft_windowed.cpp.tex
-    src/code/dsp_rfft_windowed.h.tex
-    src/code/dsp_setup.cpp.tex
-    src/code/dsp_setup.h.tex
-    src/code/sensor_self_diagnostic.cpp.tex
-    src/code/sensor_self_diagnostic.h.tex
+    src/code/verification/fs_verification.py.tex
+    src/code/verification/torques_verification.py.tex
 )
 ADD_LATEX_DOCUMENT(
     program_sources.tex

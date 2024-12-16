@@ -1,0 +1,219 @@
+\begin{lstlisting}[language=python, caption=\raggedright{calibration/tool\_calibration.py}, frame=single]
+import click
+from rdc_tools.utils import URDF_PATH
+
+
+@click.command(name="tool")
+@click.option(
+    "--urdf_robot",
+    default=URDF_PATH + "/z1_ee.urdf",
+    help="Original Robots urdf path",
+)
+@click.option(
+    "--urdf_tool",
+    default=URDF_PATH + "/tool.urdf",
+    help="Tool urdf path",
+)
+@click.option(
+    "--fixed_joint_name",
+    default="fixed_tool_joint",
+    help="Fixed tool joint",
+)
+@click.option(
+    "--out_urdf",
+    default=URDF_PATH + "/tool_calib.urdf",
+    help="Output urdf path",
+)
+@click.option("--load_data", default=None, help="Joint data to load")
+@click.option(
+    "--num_poses",
+    default=30,
+    help="The ammount of poses to collect (min:3, recommended:30)",
+)
+@click.option(
+    "--assume_coaxial",
+    default=False,
+    help="Assuming that tool is coaxial to endeffector",
+)
+def tool_calibration(
+    urdf_robot,
+    urdf_tool,
+    fixed_joint_name,
+    out_urdf,
+    load_data,
+    num_poses,
+    assume_coaxial,
+):
+    """Calibrating the tool TF of the robot
+
+    The program can be used to estimate
+    tools tip origin and rotation
+    corresponding to the robot end-effector
+    coordinate system.
+    """
+
+    import pinocchio as pin
+    import numpy as np
+    import xml.etree.ElementTree as ET
+    from pytransform3d import rotations as pr
+    from pytransform3d import transformations as pt
+    from rdc_toolbox.utils import get_pinocchio_models_from_description
+    from scipy.optimize import minimize
+    import xml.etree.ElementTree as ET
+    import numpy as np
+    from rdc_toolbox.execution.robots import (
+        Z1RobotAPI,
+    )
+    import datetime
+
+    def matrix_to_xyz_rpy(matrix):
+        """Extracts xyz and rpy from a 4x4 transformation matrix."""
+        # Translation (xyz)
+        translation = matrix[:3, 3]
+
+        # Rotation (rpy)
+        rotation_matrix = matrix[:3, :3]
+        rpy = pr.euler_from_matrix(rotation_matrix, 0, 1, 2, False)
+
+        return translation, rpy
+
+    def create_tool_urdf(
+        urdf_file, joint_name, transformation_matrix, new_urdf
+    ):
+        if transformation_matrix is None:
+            print("Unable to create urdf!")
+            return
+        # Decompose the transformation matrix
+        xyz, rpy = matrix_to_xyz_rpy(transformation_matrix)
+
+        # Load and parse the URDF file
+        tree = ET.parse(urdf_file)
+        root = tree.getroot()
+
+        # Find the joint with the specified name
+        joint = root.find(f".//joint[@name='{joint_name}']")
+        if joint is None:
+            print(f"Joint '{joint_name}' not found in URDF.")
+            return
+
+        # Modify the origin if new_origin is provided
+        origin = joint.find("origin")
+        if origin is None:
+            # If no origin exists, create one
+            origin = ET.SubElement(joint, "origin")
+        origin.set("xyz", "{} {} {}".format(*xyz))
+        origin.set("rpy", "{} {} {}".format(*rpy))
+
+        # Save the modified URDF file
+        tree.write(new_urdf, encoding="utf-8", xml_declaration=True)
+        print("Urdf saved!")
+
+    def forward_kinematics(pinmodel, data, q, ee_frame_idx=-1):
+        pin.framesForwardKinematics(pinmodel, data, q)
+        return np.array(data.oMf[ee_frame_idx].np).copy()
+
+    class ToolCalibration:
+        def __init__(
+            self,
+            urdf_filename,
+        ):
+            self._pinmodel, _, _ = get_pinocchio_models_from_description(
+                urdf_filename
+            )
+            self._data_model = self._pinmodel.createData()
+            self._data_storage = []
+            self._coax = True
+
+        def add_data(self, q: np.ndarray):
+            self._data_storage.append(np.array(q).copy())
+
+        def get_data(self):
+            return np.array(self._data_storage)
+
+        def set_data(self, qs: np.ndarray):
+            self._data_storage = qs
+
+        def transform_variance(self, x):  # objective function
+            tool_trans = x if not self._coax else [0, 0, x[0]]
+            tool2ee = pt.transform_from_pq(
+                np.hstack(
+                    (np.array(tool_trans), pr.q_id),
+                )
+            )
+            err_tool_poses = []
+            for q in self._data_storage:
+                ee2robot = forward_kinematics(
+                    self._pinmodel, self._data_model, q
+                )
+                err_tool_poses.append((ee2robot @ tool2ee)[:3, 3])
+            err_tool_poses = np.array(err_tool_poses)
+            return np.sum(np.var(err_tool_poses, axis=0, ddof=1))
+
+        def calibrate(self, coaxial=False):
+            self._coax = coaxial
+            x0 = np.zeros(3) if not self._coax else np.zeros(1)
+            res = minimize(
+                self.transform_variance,
+                x0,
+                method="nelder-mead",
+                options={"xatol": 1e-8, "disp": False},
+            )
+            return (
+                pt.transform_from_pq(
+                    np.hstack(
+                        (
+                            (
+                                res.x
+                                if not self._coax
+                                else np.array([0, 0, res.x[0]])
+                            ),
+                            pr.q_id,
+                        )
+                    )
+                )
+                if res.success
+                else None
+            )
+
+    calib = ToolCalibration(urdf_robot)
+    print("Ready for calibration")
+    if load_data is None:
+        print(f"Record {num_poses} poses with tool fixed in technical hole")
+
+    if load_data is None:
+        sim_robot = Z1RobotAPI(
+            gripper=False,
+            pinmodel=get_pinocchio_models_from_description(urdf_robot)[0],
+        )
+        sim_robot.connect()
+        sim_robot.teach_on()
+        for i in range(num_poses):
+            print("====================")
+            print(f"Go to pose {i+1}/{num_poses}.")
+            input("Press enter to record")
+            q = sim_robot.q.numpy()
+            print(q)
+            calib.add_data(q)
+
+        sim_robot.teach_off()
+        print(np.array(calib.get_data()))
+        with open(
+            f"{datetime.datetime.now().strftime('tool_calib_%d_%m_%Y__%H:%M:%S')}.npy",
+            "wb",
+        ) as f:
+            np.save(f, calib.get_data())
+    else:
+        with open(load_data, "rb") as f:
+            qs = np.load(f)
+            calib.set_data(qs)
+
+    T_matrix = calib.calibrate(assume_coaxial)
+    print("TF matrix tool link to end-effector:")
+    print(T_matrix)
+    create_tool_urdf(urdf_tool, fixed_joint_name, T_matrix, out_urdf)
+
+
+if __name__ == "__main__":
+    tool_calibration()
+
+\end{lstlisting}

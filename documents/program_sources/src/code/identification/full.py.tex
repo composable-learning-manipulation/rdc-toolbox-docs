@@ -1,0 +1,710 @@
+\begin{lstlisting}[language=python, caption=\raggedright{identification/full.py}, frame=single]
+import collections.abc
+import os, sys
+
+import click
+
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from rdc_tools.utils import RDCTools_logger, DATA_PATH, LOGGER_CONFIG_PATH, CONFIG_PATH, URDF_PATH, MAIN_PATH
+
+@click.command(name='full')
+@click.option(
+    "--config_path",
+    default="configs/learning_config.yaml",
+    show_default=True,
+    help="Path to file with yaml config",
+)
+@click.option(
+    "--urdf_path",
+    default="urdfs/z1_ee.urdf",
+    show_default=True,
+    help="Path to file with urdf model",
+)
+@click.option(
+    "--save_path",
+    default=".",
+    show_default=True,
+    help="Path of directory to save the model",
+)
+@click.option(
+    "--model_name",
+    required=True,
+    show_default=True,
+    help="Name of the model, used for saving the model and plotting the results",
+)
+@click.option(
+    "--data_path",
+    required = True,
+    show_default=True,
+    help="Path to directory containing recorded_trajectory.csv",
+)
+@click.option(
+    "-r/-nr",
+    "--recursive/--no_recursive",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Whether to load all recorded_trajectory.csv files in data_path recursively",
+)
+@click.option(
+    "--save_dataset/--no_save_dataset",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Whether to save the dataset as dataset.csv",
+)
+@click.option(
+    "--accel_mode",
+    type=click.Choice(["data", "estimate", "off"], case_sensitive=False),
+    default="estimate",
+    show_default=True,
+    help="Where to get acceleration data from, can be data (directly from dataset), estimate (numerical derivative) or off (no acceleration used, only filtered regressor can be used in this case)",
+)
+@click.option(
+    "--train_ratio",
+    default=0.75,
+    show_default=True,
+    type=click.FloatRange(0, 1),
+    help="ratio of dataset to use for training, if 1.0, no testing is done",
+)
+@click.option(
+    "--plot/--no_plot",
+    "-p/-np",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Whether to plot the results",
+)
+@click.option(
+    "-v/-q",
+    "--verbose/--quiet",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Whether to print debug information",
+)
+def full_learn(
+    config_path,
+    urdf_path,
+    save_path,
+    model_name,
+    data_path,
+    recursive,
+    save_dataset,
+    accel_mode,
+    train_ratio,
+    plot,
+    verbose,
+):
+    """Full Inverse dynamic model Identification
+
+    Before use it please generate
+    and execute multiharmonic trajectories
+
+    -----
+
+    Example:
+    
+    rdc ident full --urdf_path urdfs/z1_ee.urdf --data_path data/base_trj/opttraj_0_85cond_7h_2000Hz/ --config_path configs/learning_config.yaml --verbose  --plot --model_name my --save_path my --accel_mode estimate
+    
+    -----
+    """
+
+    import eagerpy as ep
+    import numpy as np
+    import pandas as pd
+    import torch
+    import yaml
+    import pathlib
+
+
+    from rdc_toolbox.data_processing import get_filtred
+    from rdc_toolbox.execution import eval_dataset_for_model
+    from rdc_toolbox.model import (
+        BaseRDCModel,
+        ComposedRDCModel,
+        FilteredPinocchioRegressionRDCModel,
+        MLPRDCModel,
+        PinocchioRegressionRDCModel,
+        RegressionRDCModel,
+        TensorCallable,
+        get_learnable_coulomb_viscouce_friction_parameters,
+        get_learnable_diffbary_parameters,
+        get_learnable_diffnea_parameters,
+        get_learnable_regular_parameters,
+        get_numerical_coulomb_viscouce_friction_regressor,
+        get_numerical_regression_parameters_from_pinocchio,
+    )
+    from rdc_toolbox.solver import NonLinearSolver
+    from rdc_toolbox.utils import get_pinocchio_models_from_description
+    from rdc_toolbox.visualization import compose_multiple_plot_with_vline
+
+
+    def get_config(config_path="", verbose=False):
+        def update_dict(d, u):
+            for k, v in u.items():
+                if isinstance(v, collections.abc.Mapping):
+                    d[k] = update_dict(d.get(k, {}), v)
+                else:
+                    d[k] = v
+            return d
+
+        defalut = {
+            "filter": {
+                "dq": {"type": None, "parameters": {}},
+                "ddq": {"type": None, "parameters": {}},
+                "tau": {"type": None, "parameters": {}},
+            },
+            "base": {
+                "source": "learn",
+                "path": "",
+                "regressor": {"type": "regular", "dt": 0.002},
+                "parameters": {"type": "regular", "init_std": 0.01},
+            },
+            "friction": {"source": "learn", "path": ""},
+            "residuals": {
+                "source": "learn",
+                "path": "",
+                "type": "mlp",
+                "hidden_channels": [64, 64],
+                "dropout": 0.25,
+                "norm_layer": "LayerNorm",
+                "activation_layer": "Tanh",
+                "use_limits": False,
+            },
+            "solver": {
+                "lrs": {
+                    "base": 0.004,
+                    "friction": 0.01,
+                    "residuals": 0.0004,
+                },
+                "optimizer": "Adam",
+                "optimizer_options": {},
+                "num_epochs": 1000,
+                "batch_size": 1000,
+                "validation_ratio": 0.2,
+                "lr_scheduler_factor": 0.1,
+                "lr_scheduler_patience": 5,
+                "lr_scheduler_min_delta": 0.1,
+                "es_patience": 10,
+                "es_min_delta": 0.1,
+                "reduction": "qr",
+                "shuffle": True,
+            },
+        }
+        try:
+            with open(config_path, "r") as file:
+                try:
+                    config = yaml.safe_load(file)
+                except yaml.YAMLError:
+                    config = {}
+                    if verbose:
+                        click.echo(
+                            "Error parsing config file, falling back to default"
+                        )
+        except FileNotFoundError:
+            config = {}
+            if verbose:
+                click.echo("Config file not found, falling back to default")
+        except TypeError:
+            config = {}
+            if verbose:
+                click.echo("Config file not found, falling back to default")
+
+        return update_dict(defalut, config)
+
+
+    def evaluate_solver(
+        solver,
+        pinmodel,
+        model_name,
+        dataset,
+        train_test_ratio,
+        plot_graph,
+        verbose,
+    ):
+        train_test_split_index = int(train_test_ratio * (len(dataset) - 1))
+        train_test_split_time = dataset["timestamp"].iloc[train_test_split_index]
+
+        def rmse_loss_func(pred, real, t):
+            def mse(pred, real):
+                return np.mean((pred - real) ** 2)
+
+            def rmse(pred, real):
+                return np.sqrt(mse(pred, real))
+
+            def nrmse(pred, real):
+                return rmse(pred, real) / np.sqrt(np.mean(real**2))
+
+            def mae(pred, real):
+                return np.mean(np.abs(pred - real))
+
+            def iae(pred, real, t, normalize=False, t_full=None):
+                error = np.abs(pred - real)
+                iae_value = np.trapz(error, t, axis=0)
+                if normalize:
+                    time_range = t[-1] - t[0]
+                    iae_value /= time_range
+                    if t_full is not None:
+                        time_range_full = t_full[-1] - t_full[0]
+                        iae_value *= time_range_full
+                return np.mean(iae_value)
+
+            real = real.reshape(-1, pinmodel.nq)
+            pred = pred.reshape(-1, pinmodel.nq)
+            out_data = dataset.copy()
+            for i in range(0, pinmodel.nq):
+                out_data[f"tau_{i}"] = pred[:, i]
+            stats = {
+                "IAE": lambda pred, real, t, t_full: iae(pred, real, t, False),
+                "SIAE": lambda pred, real, t, t_full: iae(
+                    pred, real, t, True, t_full
+                ),
+                "NIAE": lambda pred, real, t, t_full: iae(pred, real, t, True),
+                "MAE": lambda pred, real, t, t_full: mae(pred, real),
+                "MSE": lambda pred, real, t, t_full: mse(pred, real),
+                "RMSE": lambda pred, real, t, t_full: rmse(pred, real),
+                "NRMSE": lambda pred, real, t, t_full: nrmse(pred, real),
+            }
+            pred_subs = {
+                "Full ": pred,
+                "Train": pred[:train_test_split_index, :],
+                "Test ": pred[train_test_split_index:, :],
+            }
+            real_subs = {
+                "Full ": real,
+                "Train": real[:train_test_split_index, :],
+                "Test ": real[train_test_split_index:, :],
+            }
+            t_subs = {
+                "Full ": t,
+                "Train": t[:train_test_split_index],
+                "Test ": t[train_test_split_index:],
+            }
+
+            loss_str = ""
+            for stat_name, stat_func in stats.items():
+                for sub in pred_subs.keys():
+                    results = {
+                        f"tau_{i}": np.round(
+                            stat_func(
+                                pred_subs[sub][:, i],
+                                real_subs[sub][:, i],
+                                t_subs[sub],
+                                t,
+                            ),
+                            2,
+                        )
+                        for i in range(pinmodel.nq)
+                    }
+                    results["tau"] = np.round(
+                        stat_func(
+                            pred_subs[sub],
+                            real_subs[sub],
+                            t_subs[sub],
+                            t,
+                        ),
+                        2,
+                    )
+                    loss_str += f"{stat_name} {sub} : {results}\n"
+                loss_str += "\n"
+
+            return loss_str, out_data
+
+        out_data = None
+        if train_test_ratio < 1.0:
+            if verbose:
+                click.echo("Evaluating on dataset")
+            solver.model.reset()
+            loss_str, out_data = solver.test(
+                dataset, "tau", rmse_loss_func, True, True
+            )
+            click.echo(loss_str)
+        else:
+            if verbose:
+                click.echo("No testing done, train ratio is 1.0")
+
+        if plot_graph:
+            solver.model.reset()
+            if out_data is None:
+                if verbose:
+                    click.echo("Evaluating on dataset for plotting")
+                estimated_trajectory = eval_dataset_for_model(
+                    solver.model, dataset
+                )
+            else:
+                if verbose:
+                    click.echo(
+                        "Skipping evaluation for plotting, done before for testing"
+                    )
+                estimated_trajectory = out_data
+            compose_multiple_plot_with_vline(
+                [
+                    dataset,
+                    estimated_trajectory,
+                ],
+                ["Act", model_name],
+                ["tau"],
+                show=True,
+                vline_pos=train_test_split_time,
+                title=f"{model_name} Results",
+            )
+            solver.model.reset()
+
+
+    def prepare_dataset(
+        data_path,
+        save_dataset,
+        config,
+        pinmodel,
+        train_ratio,
+        recursive=False,
+        verbose=False,
+        accel="estimate",
+    ):
+
+        def prepare_traj(traj_path, t0):
+            try:
+                traj = pd.read_csv(traj_path)
+            except Exception:
+                click.echo(f"Trajectory {traj_path} couldn't be loaded, Aborting")
+                exit(1)
+            if verbose:
+                print(f"Loaded {traj_path}")
+            traj["timestamp"] = traj["timestamp"] - traj["timestamp"].iloc[0] + t0
+            if config["filter"]["dq"]["type"] is not None:
+                traj = get_filtred(
+                    data_in=traj,
+                    names=["dq"],
+                    graph=[False, False],
+                    filter_type=config["filter"]["dq"]["type"],
+                    **config["filter"]["dq"]["parameters"],
+                )
+            if accel == "estimate":
+                for i in range(0, pinmodel.nq):
+                    traj[f"ddq_{i}"] = np.gradient(
+                        traj[f"dq_{i}"], traj["timestamp"]
+                    )
+            if config["filter"]["ddq"]["type"] is not None:
+                traj = get_filtred(
+                    data_in=traj,
+                    names=["ddq"],
+                    graph=[False, False],
+                    filter_type=config["filter"]["ddq"]["type"],
+                    **config["filter"]["ddq"]["parameters"],
+                )
+            if config["filter"]["tau"]["type"] is not None:
+                traj = get_filtred(
+                    data_in=traj,
+                    names=["tau"],
+                    graph=[False, False],
+                    filter_type=config["filter"]["tau"]["type"],
+                    **config["filter"]["tau"]["parameters"],
+                )
+            if verbose:
+                click.echo("Trajectory prepared")
+            return traj
+
+        if recursive:
+            paths = list(pathlib.Path(data_path).rglob("recorded_trajectory.csv"))
+        else:
+            paths = list(pathlib.Path(data_path).glob("recorded_trajectory.csv"))
+        if len(paths) == 0:
+            if recursive:
+                click.echo(
+                    f"No recorded_trajectory.csv found in {data_path} recursively, Aborting"
+                )
+            else:
+                click.echo(
+                    f"No recorded_trajectory.csv found in {data_path}, Aborting"
+                )
+            exit(1)
+
+        prepared_trajs = []
+        t0 = 0
+        for path in paths:
+            traj = prepare_traj(path, t0)
+            t0 = traj["timestamp"].iloc[-1]
+            if traj is not None:
+                prepared_trajs.append(traj)
+            else:
+                exit(1)
+
+        dataset = pd.concat(prepared_trajs)
+        if save_dataset:
+            dataset.to_csv(pathlib.Path(data_path) / "dataset.csv")
+            if verbose:
+                click.echo(
+                    f"Dataset saved at {pathlib.Path(data_path) / 'dataset.csv'}"
+                )
+        if verbose:
+            click.echo("Dataset prepared")
+        indices = np.arange(0, dataset.shape[0])
+        indices_train = indices[: int(train_ratio * (len(indices) - 1))]
+        train_dataset = dataset.iloc[indices_train]
+        if verbose:
+            click.echo(
+                f"Train dataset prepared, with number of samples: {len(train_dataset)}",
+            )
+
+        return dataset, train_dataset
+
+
+    def prepare_model(config, pinmodel, accel, verbose):
+        base_source = config["base"]["source"]
+        if base_source is None:
+            base_model = None
+        elif base_source == "load":
+            base_model = BaseRDCModel.load(config["base"]["path"])
+        else:
+            if base_source == "urdf":
+                parameters = get_numerical_regression_parameters_from_pinocchio(
+                    pinmodel, vtype=ep.tensor.pytorch.PyTorchTensor
+                )
+            elif base_source == "learn":
+                parameters_type = config["base"]["parameters"]["type"]
+                parameters_std = config["base"]["parameters"]["init_std"]
+                if parameters_type == "diffbary":
+                    parameters = get_learnable_diffbary_parameters(
+                        pinmodel.nq, parameters_std
+                    )
+                elif parameters_type == "diffnea":
+                    parameters = get_learnable_diffnea_parameters(
+                        pinmodel.nq, parameters_std
+                    )
+                elif parameters_type == "regular":
+                    parameters = get_learnable_regular_parameters(
+                        pinmodel.nq, parameters_std
+                    )
+                else:
+                    raise ValueError(
+                        f"Unknown parameters type {parameters_type}, can be diffbary, diffnea or regular"
+                    )
+            else:
+                raise ValueError(
+                    f"Unknown base source {base_source}, can be null, load, urdf or learn"
+                )
+            regressor_type = config["base"]["regressor"]["type"]
+            if accel == "off" and regressor_type != "filtered":
+                click.echo(
+                    "With no acceleration, only filtered regressor can be used, defaulting to filtered"
+                )
+                regressor_type = "filtered"
+            if regressor_type == "regular":
+                base_model = PinocchioRegressionRDCModel(
+                    pinmodel,
+                    parameters=parameters,
+                    vtype=ep.tensor.pytorch.PyTorchTensor,  # must be consistent with type parameters
+                )
+            elif regressor_type == "filtered":
+                dt = config["base"]["regressor"]["dt"]
+                base_model = FilteredPinocchioRegressionRDCModel(
+                    pinmodel,
+                    dt=dt,
+                    parameters=parameters,
+                    vtype=ep.tensor.pytorch.PyTorchTensor,
+                )
+            else:
+                raise ValueError(
+                    f"Unknown regressor type {regressor_type}, can be regular or filtered"
+                )
+
+        friction_source = config["friction"]["source"]
+        if friction_source is None:
+            friction_model = None
+        elif friction_source == "load":
+            friction_model = BaseRDCModel.load(config["friction"]["path"])
+        elif friction_source == "learn":
+            friction_model = RegressionRDCModel(
+                TensorCallable(
+                    get_numerical_coulomb_viscouce_friction_regressor,
+                    vtype=ep.tensor.pytorch.PyTorchTensor,
+                    out_shape=(pinmodel.nq, pinmodel.nq * 2),
+                ),
+                parameters=get_learnable_coulomb_viscouce_friction_parameters(
+                    pinmodel.nq
+                ),
+            )
+        else:
+            raise ValueError(
+                f"Unknown friction source {friction_source}, can be null, load or learn"
+            )
+
+        residuals_source = config["residuals"]["source"]
+        if residuals_source is None:
+            residuals_model = None
+        elif residuals_source == "load":
+            residuals_model = BaseRDCModel.load(config["residuals"]["path"])
+        elif residuals_source == "learn":
+            type = config["residuals"]["type"]
+            if type != "mlp":
+                raise ValueError(f"Unknown residuals type {type}, can be mlp only")
+            hidden_channels = config["residuals"]["hidden_channels"]
+            dropout = config["residuals"]["dropout"]
+            norm_layer = config["residuals"]["norm_layer"]
+            if norm_layer is not None:
+                try:
+                    norm_layer = getattr(torch.nn, norm_layer)
+                except AttributeError:
+                    raise ValueError(
+                        f"Unknown norm_layer {norm_layer}, should be torch.nn.<norm_layer>"
+                    )
+            activation_layer = config["residuals"]["activation_layer"]
+            if activation_layer is not None:
+                try:
+                    activation_layer = getattr(torch.nn, activation_layer)
+                except AttributeError:
+                    raise ValueError(
+                        f"Unknown activation_layer {activation_layer}, should be torch.nn.<activation_layer>"
+                    )
+            num_inputs_per_joint = 3
+            if accel == "off":
+                if verbose:
+                    click.echo("Acceleration is not used in residuals")
+                num_inputs_per_joint = 2
+            if config["residuals"]["use_limits"]:
+                q_limits = (
+                    torch.tensor(pinmodel.lowerPositionLimit),
+                    torch.tensor(pinmodel.upperPositionLimit),
+                )
+                dq_limits = (
+                    -torch.tensor(pinmodel.velocityLimit),
+                    torch.tensor(pinmodel.velocityLimit),
+                )
+            else:
+                q_limits = None
+                dq_limits = None
+            residuals_model = MLPRDCModel(
+                num_joints=pinmodel.nq,
+                num_inputs_per_joint=num_inputs_per_joint,
+                hidden_channels=hidden_channels,
+                dropout=dropout,
+                norm_layer=norm_layer,
+                activation_layer=activation_layer,
+                q_limits=q_limits,
+                dq_limits=dq_limits,
+            )
+        else:
+            raise ValueError(
+                f"Unknown residuals source {residuals_source}, can be null, load or learn"
+            )
+
+        models = []
+        params = []
+        lrs = []
+        if base_model is not None:
+            models.append(base_model)
+            if base_source == "learn":
+                params.append(base_model.parameters.raw.values())
+                lrs.append(config["solver"]["lrs"]["base"])
+        if friction_model is not None:
+            models.append(friction_model)
+            if friction_source == "learn":
+                params.append(friction_model.parameters.raw.values())
+                lrs.append(config["solver"]["lrs"]["friction"])
+        if residuals_model is not None:
+            models.append(residuals_model)
+            if residuals_source == "learn":
+                params.append(residuals_model.parameters.raw.values())
+                lrs.append(config["solver"]["lrs"]["residuals"])
+
+        model = ComposedRDCModel(models)
+        if verbose:
+            click.echo("Model created")
+
+        return model, params, lrs
+
+
+    def prepare_solver(config, model):
+        optimizer = config["solver"]["optimizer"]
+        try:
+            optimizer = getattr(torch.optim, optimizer)
+        except AttributeError:
+            raise ValueError(
+                f"Unknown optimizer {optimizer}, should be torch.optim.<optimizer>"
+            )
+        optimizer_options = config["solver"]["optimizer_options"]
+        if optimizer_options is None:
+            optimizer_options = {}
+        num_epochs = config["solver"]["num_epochs"]
+        batch_size = config["solver"]["batch_size"]
+        validation_ratio = config["solver"]["validation_ratio"]
+        lr_scheduler_factor = config["solver"]["lr_scheduler_factor"]
+        lr_scheduler_patience = config["solver"]["lr_scheduler_patience"]
+        lr_scheduler_min_delta = config["solver"]["lr_scheduler_min_delta"]
+        es_patience = config["solver"]["es_patience"]
+        es_min_delta = config["solver"]["es_min_delta"]
+        reduction = config["solver"]["reduction"]
+        shuffle = config["solver"]["shuffle"]
+        solver = NonLinearSolver(model)
+
+        return solver, {
+            "optimizer": optimizer,
+            "optimizer_options": optimizer_options,
+            "num_epochs": num_epochs,
+            "batch_size": batch_size,
+            "validation": validation_ratio,
+            "lr_scheduler_factor": lr_scheduler_factor,
+            "lr_scheduler_patience": lr_scheduler_patience,
+            "lr_scheduler_min_delta": lr_scheduler_min_delta,
+            "es_patience": es_patience,
+            "es_min_delta": es_min_delta,
+            "reduction": reduction,
+            "shuffle": shuffle,
+        }
+
+
+    config = get_config(config_path, verbose)
+    if verbose:
+        click.echo("Config created")
+        click.echo(config)
+    pinmodel, _, _ = get_pinocchio_models_from_description(urdf_path)
+    dataset, train_dataset = prepare_dataset(
+        data_path,
+        save_dataset,
+        config,
+        pinmodel,
+        train_ratio,
+        recursive,
+        verbose,
+    )
+    model, params, lrs = prepare_model(config, pinmodel, accel_mode, verbose)
+    solver, solver_params = prepare_solver(config, model)
+
+    if len(params) == 0:
+        if verbose:
+            click.echo("Nothing to train")
+    else:
+        model = solver.train(
+            train_dataset,
+            params=params,
+            lrs=lrs,
+            **solver_params,
+            verbose=verbose,
+        )
+    if verbose:
+        click.echo("Model trained")
+
+    evaluate_solver(
+        solver,
+        pinmodel,
+        model_name,
+        dataset,
+        train_ratio,
+        plot,
+        verbose,
+    )
+
+    model_save_path = (
+        f"{pathlib.Path(save_path).join_path(model_name).absolute()}"
+    )
+    model.save(model_save_path)
+    if verbose:
+        click.echo(f"Model saved at {model_save_path}")
+
+
+if __name__ == "__main__":
+    full_learn()
+
+\end{lstlisting}

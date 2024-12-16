@@ -1,0 +1,259 @@
+\begin{lstlisting}[language=python, caption=\raggedright{identification/friction.py}, frame=single]
+import sys, os
+import numpy as np
+import pandas as pd
+
+from rdc_tools.utils import RDCTools_logger, DATA_PATH, LOGGER_CONFIG_PATH, CONFIG_PATH, URDF_PATH, MAIN_PATH
+from rdc_toolbox.data_processing import get_filtred
+from rdc_toolbox.visualization import compose_multiple_plot_with_vline, compose_two_plot
+import click
+from pathlib import Path
+from typing import List, Dict
+from scipy.optimize import least_squares
+
+
+@click.command(name='friction')
+@click.option('--data_path', required=True, help='Path to read trajectories')
+@click.option('--save_path', required=True, help='Path to save model')
+@click.option('--offset', default=50, help='Offset on plato')
+@click.option('--save_plots_path', default=None, help='Path to save plots')
+def friction_learn(data_path, save_path, offset, save_plots_path):
+    """Friction model Identification
+
+    Before use it please generate
+    and execute special LSPB trajectories
+    """
+
+    from rdc_toolbox.trajectory import Trajectory, get_friction_identification_trajectories
+    from rdc_toolbox.model import get_numerical_coulomb_viscouce_friction_regressor
+    from rdc_toolbox.solver import LSESolver
+    from rdc_toolbox.model import FrictionRDCModel, RDCParameters
+    import eagerpy as ep
+    from rdc_toolbox.model import TensorCallable
+    from rdc_toolbox.utils import parse_dataset
+
+
+    import matplotlib.pyplot as plt
+    import logging
+
+    def get_paths_contain_traj(directory: Path) -> List[Dict[str, Path]]:
+        path_trajectories_to_analyze = []
+        for path in directory.rglob('*'):
+
+            if path.name == 'desired_trajectory.csv':
+                all_files = list(path.parent.rglob('*')) 
+                files = sorted([file for file in all_files if file.is_file()])
+                paths = {
+                    str(path.stem): path
+                }
+                for file in files:
+                    if file.name == 'recorded_desired_trajectory.csv' or file.name == 'recorded_trajectory.csv':
+                        paths[file.stem] = file
+
+                if len(paths.keys()) == 3:
+                    path_trajectories_to_analyze.append(paths)
+
+        return path_trajectories_to_analyze
+
+    RDCTools_logger.initialize(LOGGER_CONFIG_PATH, "ident")
+    logger = logging.getLogger("interactive")
+    
+
+    logger.info(f"Identificate friction model based on data in folder {data_path}")
+   
+    current_directory = Path.joinpath(Path.cwd(), data_path)
+    paths_to_analyze = get_paths_contain_traj(current_directory)
+    
+    if len(paths_to_analyze) == 0:
+        logger.error(f"Cannot find in directory {current_directory} recursively recoded_trajectory.csv")
+        exit(1)
+   
+    trajectories = []
+    for path in paths_to_analyze:
+
+        traj_info = dict(
+            zip(["joint_num", "dq_const", "ddq_const"], 
+                [param for param in str( path['desired_trajectory'].parent.name).split('_')[1:]]) 
+        )
+        
+        for key in path.keys():
+            traj_info[key] = path[key] #pd.read_csv(path[key])
+        trajectories.append(traj_info)
+
+    if len(trajectories) == 0:
+        logger.error(f"Cannot find any trajectories in {current_directory}")
+        exit(1)
+        
+    nq = np.sum(np.char.startswith(list(pd.read_csv(trajectories[0]['recorded_trajectory']).columns), 'q_')) 
+    
+    params = []
+    for i in range(nq):
+        dqs_mean = []
+        taus_mean = []
+        
+        for traj_info in trajectories:
+          
+            if traj_info['joint_num'] != str(i):
+                continue
+            
+            # traj_info['recorded_trajectory'] = get_filtred(
+            # data_in=traj_info['recorded_trajectory'],
+            # names=["dq"],
+            # filter_type="butterworth",
+            # graph=[False, False],
+            # order=3,
+            # cutoff_hz=1,
+            # dt= 0.002
+            # )
+
+            # traj_info['recorded_trajectory'] = get_filtred(
+            #     data_in=traj_info['recorded_trajectory'],
+            #     names=["tau"],
+            #     filter_type="butterworth",
+            #     graph=[False, False],
+            #     order=3,
+            #     cutoff_hz=1,
+            #     dt= 0.002
+            # )
+
+
+            raw_data = pd.read_csv(traj_info['recorded_trajectory'])[['timestamp', f'q_{i}', f'dq_{i}', f'ddq_{i}', f'tau_{i}']]
+            timestamp, _, dqs, _, taus = parse_dataset(raw_data).values()
+            raw_data_desired = pd.read_csv(traj_info['recorded_desired_trajectory'])[['timestamp', f'q_{i}', f'dq_{i}', f'ddq_{i}', f'tau_{i}']]
+            _, _, dqs_des, _, _ = parse_dataset(raw_data_desired).values()
+            timestamp = timestamp.numpy().flatten()
+            dqs_des = dqs_des.numpy().flatten()
+            dqs = dqs.numpy().flatten()
+            taus = taus.numpy().flatten()
+            # compose_multiple_plot_with_vline()
+            # compose_two_plot(traj_info['recorded_trajectory'], traj_info['recorded_desired_trajectory'], ["dq"])
+            # plt.style.use("bmh")
+            # params = {
+            #     "ytick.color": "black",
+            #     "xtick.color": "black",
+            #     "axes.labelcolor": "black",
+            #     "axes.edgecolor": "black",
+            #     "text.usetex": True,
+            #     "font.family": "serif",
+            #     "font.serif": ["Computer Modern Serif"],
+            # }
+            # plt.rcParams.update(params)
+           
+            # fig, ax = plt.subplots()
+            # ax.plot(timestamp, dqs, color='black', linewidth=2, alpha=0.8, label='$\dot{q}$')
+            # ax.plot(timestamp, dqs_des, color='tab:orange', linewidth=2, alpha=0.9, label='$\dot{q}_{des}$')
+            # ax.fill_between(timestamp, 0, 1, where=abs(dqs_des - np.max(dqs_des)) < 0.001,
+            #     color='tab:cyan', alpha=0.5, transform=ax.get_xaxis_transform(), linestyles='--', edgecolors='black', linewidth=2)
+            # ax.fill_between(timestamp, 0, 1, where=abs(dqs_des + np.max(dqs_des)) < 0.001,
+            #     color='tab:cyan', alpha=0.5, transform=ax.get_xaxis_transform(), linestyles='--', edgecolors='black', linewidth=2)
+            # # ax.plot(timestamp, 0, 1)
+            # x = np.mean([timestamp[np.where(abs(dqs_des + np.max(dqs_des)) < 0.001)[0]], timestamp[np.where(abs(dqs_des + np.max(dqs_des)) < 0.001)[-1]]])
+            # ax.text(x - 0.3, 0, '$\dot{q} = -\\textup{c}$, $\dot{q} < 0$', fontsize=20, ma='center')
+            # x = np.mean([timestamp[np.where(abs(dqs_des - np.max(dqs_des)) < 0.001)[0]], timestamp[np.where(abs(dqs_des - np.max(dqs_des)) < 0.001)[-1]]])
+            # ax.text(x - 0.3, 0, '$\dot{q} = \\textup{c}$, $\dot{q} > 0$', fontsize=20, ma='center')
+            # ax.set_ylabel("$\dot{q}, rad/s$", fontsize=16)
+            # ax.set_xlabel(
+            #     "time, s", fontsize=16
+            # )
+            # ax.legend(fontsize="16")
+            # ax.grid(True)
+            # plt.show()
+            desired_speed = dqs_des 
+            actual_speed = dqs 
+
+            desired_speed = (desired_speed - np.mean(desired_speed)) / np.std(desired_speed)
+            actual_speed = (actual_speed - np.mean(actual_speed)) / np.std(actual_speed)
+
+            idxs = []
+            plato = []
+            on_plato = False
+            for j in range(len(dqs_des)):
+                if abs(dqs_des[j] - float(traj_info["dq_const"])) < 0.001:
+                    plato.append(j)
+                    on_plato = True
+                elif on_plato:
+                    on_plato = False
+                    idxs.append(np.array(plato)[offset:-offset])
+                    plato = []
+
+            idxs = np.array(idxs).flatten()
+            taus_mean_pos = np.mean(taus[idxs])
+            dqs_mean.append(np.mean(dqs[idxs]))
+            
+            idxs = []
+            plato = []
+            on_plato = False
+            for j in range(len(dqs_des)):
+
+                if abs(dqs_des[j] + float(traj_info["dq_const"])) < 0.001:
+                    plato.append(j)
+                    on_plato = True
+                elif on_plato:
+                    on_plato = False
+                    idxs.append(np.array(plato)[offset:-offset])
+                    plato = []
+
+            idxs = np.array(idxs).flatten()
+            
+            taus_mean_neg = np.mean(taus[idxs])
+            
+            # dqs_mean.append(dqs[idxs])
+            taus_mean.append((taus_mean_pos - taus_mean_neg) / 2.0)
+           
+        df = pd.DataFrame({
+            'timestamp': np.zeros_like(dqs_mean),
+            'q_0': np.zeros_like(dqs_mean),
+            'dq_0': dqs_mean, 
+            'ddq_0': np.zeros_like(dqs_mean),
+            'tau_0': taus_mean  
+        })
+
+        if df.shape[0] == 0:
+            raise RuntimeError("Identification Error, please provide not empty dataset")
+        
+       
+        dqs_mean = np.sort(np.array(dqs_mean))
+        taus_mean = np.sort(np.array(taus_mean))
+
+        def func(x):
+            system = []
+
+            for i in range(dqs_mean.shape[0]):
+                system.append((x[0] + (x[2] - x[0]) * np.exp(-(np.abs(dqs_mean[i] / x[3])**x[4]))) * np.sign(dqs_mean[i]) + x[1] * dqs_mean[i] - taus_mean[i])
+            
+            for i in range(dqs_mean.shape[0]):
+                system.append((x[0] + (x[2] - x[0]) * np.exp(-(np.abs(-dqs_mean[i] / x[3])**x[4]))) * np.sign(-dqs_mean[i]) + x[1] * -dqs_mean[i] + taus_mean[i])
+            return system
+        
+        
+        x = least_squares(func, [1, 1, 1, 1, 1]).x
+        plt.plot(-dqs_mean, (x[0] + (x[2] - x[0]) * np.exp(-(np.abs(-dqs_mean / x[3])**x[4]))) * np.sign(-dqs_mean) + x[1] * -dqs_mean, color='b')
+        plt.scatter(-dqs_mean, -taus_mean, color='r', label='data')
+        plt.plot(dqs_mean, (x[0] + (x[2] - x[0]) * np.exp(-(np.abs(dqs_mean / x[3])**x[4]))) * np.sign(dqs_mean) + x[1] * dqs_mean, color='b')
+        plt.scatter(dqs_mean, taus_mean, color='r', label='data')
+        
+        plt.grid()
+        plt.legend()
+        plt.title(f"Joint {i} friction") #" a = {friction_model.parameters.raw['weight'][1]}, b = {friction_model.parameters.raw['weight'][0]}")
+        plt.xlabel('dq')
+        plt.ylabel('tau')
+        # plt.show()
+
+        if not save_plots_path is None:
+            plt.savefig(f'{save_plots_path}/joint_{i}.png')
+            plt.show()
+
+        params.append(x)
+
+    params = {'weight': np.array(params).flatten()}
+    friction_model = FrictionRDCModel(
+        RDCParameters(params)
+    )
+    # print(friction_model.compute_inverse_dynamic(dqs))
+    logger.info(f"Saving friction model into {save_path}")
+    friction_model.save(save_path)
+
+if __name__ == '__main__':
+    friction_learn()
+
+\end{lstlisting}

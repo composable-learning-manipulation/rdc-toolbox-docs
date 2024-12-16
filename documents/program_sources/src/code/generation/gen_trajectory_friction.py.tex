@@ -1,0 +1,68 @@
+\begin{lstlisting}[language=python, caption=\raggedright{generation/gen\_trajectory\_friction.py}, frame=single]
+import sys, os
+import numpy as np
+import pandas as pd
+from rdc_tools.utils import RDCTools_logger, DATA_PATH, LOGGER_CONFIG_PATH, CONFIG_PATH, URDF_PATH
+import click
+import yaml
+from pathlib import Path
+import logging
+
+@click.command(
+    name="friction",
+    help=R"""Run the generation of trajectories for friction.
+    
+    Example usage:
+
+    rdc gen friction
+    
+    """,
+)
+@click.option('--config_path', default=os.path.join(CONFIG_PATH, 'z1_friction_gen_traj_config.yaml'), help='Path to config for trajectory generation')
+@click.option('--urdf_path', default=os.path.join(URDF_PATH, 'z1_ee.urdf'), help='Path to urdf model')
+@click.option('--output_path', default=os.path.join(DATA_PATH, 'friction'), help='Path to save trajectories')
+@click.option('--skip_exist', is_flag=True, show_default=True, default=False, help='If true, script will skip folders where desired.csv already exists')
+@click.option('--type', show_default=True, default="friction", help='The type of trajectories that will be generated: friction|base')
+def gen_traj_friction(config_path, urdf_path, output_path, skip_exist, type):
+    
+    from rdc_toolbox.trajectory import Trajectory
+    from rdc_toolbox.trajectory import get_friction_identification_trajectories, get_static_friction_identification_trajectories
+    from rdc_toolbox.visualization import one_plot
+
+    RDCTools_logger.initialize(LOGGER_CONFIG_PATH, "gen_traj_friction")
+    logger = logging.getLogger("interactive")   
+
+    if type == 'friction' or type == 'static_friction':
+        """Program for friction identification trajectories generation"""
+        click.echo(f"Generated trajectories based on config: {config_path}")
+        with open(config_path) as config_file:
+            config = yaml.load(config_file, Loader=yaml.SafeLoader)
+        if type == 'static_friction':
+            trajectories = get_static_friction_identification_trajectories(config, urdf_path)
+        elif type == 'friction':
+            trajectories = get_friction_identification_trajectories(config, urdf_path)
+
+        RDCTools_logger.add_progress_bar("gen_traj_friction", len(trajectories), "Generate trajectories for each joint", "joint")
+        for key, v in trajectories.items():
+            for trajectory in trajectories[key]:
+                data_frame = trajectory.to_dataframe()
+                datafile_name = "desired_trajectory.csv"
+                folder_name = f"traj_{key}_{np.round(np.max(trajectory.dq[:, key].raw), 2)}_{np.round(np.max(trajectory.ddq[:, key].raw), 2)}"
+                target_path = Path(f"{output_path}/{folder_name}")
+                if skip_exist and target_path.exists():
+                    logger.warning(f"Skipped because {target_path} because path already exists")
+                else:
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    data_frame.to_csv(
+                        f"{output_path}/{folder_name}/{datafile_name}", index=False
+                    )
+                # one_plot(data_frame, "dq")
+                logger.info("New trajectory for friction was generated: %s", target_path)
+            RDCTools_logger.tick_progress_bar("gen_traj_friction", 1)
+    elif type == 'base':
+        click.echo(f"Generation of the trajectories for base model currently is not implemented")
+    
+if __name__ == '__main__':
+    gen_traj_friction()
+
+\end{lstlisting}
