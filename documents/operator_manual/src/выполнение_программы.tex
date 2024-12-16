@@ -3,7 +3,7 @@
 % Раздел <<Выполнение программы>> содержит сведения о последовательности действий оператора, обеспечивающих загрузку, запуск, выполнение и завершение программы. Приведено описание функций, формата и возможных вариантов команд, с помощью которых оператор осуществляет загрузки и управляет выполнением программы, а также ответы программы на эти команды.
 
 Взаимодействие оператора и программы обеспечивается посредством интерфейса командной строки или консоли.
-Для всех команд программы предусмотрена форма интерактивного взаимедйствия, где оператору необходимо ввести или входные данные или подтвердить дальнейшее выполнение программы.
+Для всех команд программы предусмотрена форма интерактивного взаимодействия, где оператору необходимо ввести или входные данные или подтвердить дальнейшее выполнение программы.
 
 Ниже представлена структурированная документация по командам для вызова и их параметрам.
 
@@ -188,7 +188,7 @@ rdc exec [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-exec-traj}{%
-\subsubsection{ Команда rdc exec traj}\label{rdc-exec-traj}}
+\subsubsection{Команда rdc exec traj}\label{rdc-exec-traj}}
 
 \textbf{Использование:}
 \begin{lstlisting}[language=python, numbers=none, frame=single]
@@ -273,7 +273,7 @@ rdc gen [OPTIONS] COMMAND [ARGS]...
 \end{center}
 
 \hypertarget{rdc-gen-fourier}{%
-\subsubsection{ Команда rdc gen fourier}\label{rdc-gen-fourier}}
+\subsubsection{Команда rdc gen fourier}\label{rdc-gen-fourier}}
 
 Запустить генерацию оптимальной траектории на основе ряда Фурье для последовательного робота-манипулятора.
 
@@ -317,7 +317,7 @@ rdc gen fourier [OPTIONS]
 \end{center}
 
 \hypertarget{rdc-gen-friction}{%
-\subsubsection{ Команда rdc gen friction}\label{rdc-gen-friction}}
+\subsubsection{Команда rdc gen friction}\label{rdc-gen-friction}}
 
 Сгенерировать траектории для идентиикации трения.
 
@@ -361,7 +361,7 @@ rdc gen friction [OPTIONS]
 
 Идентификация модели обратной динамики.
 
-Проидентифицировать полную модель или только модель трения на собранном датасете. В результате будет получена \textit{.rdcm} модель
+Провести идентификацию полной модели или отдельно модели трения на собранном датасете. В результате будет получена \textit{.rdcm} модель
 
 \textbf{Использование:}
 \begin{lstlisting}[language=python, numbers=none, frame=single]
@@ -463,7 +463,7 @@ recorded\_trajectory.csv & \_required \\
 \texttt{True} \\
 \hline
 \texttt{-\/-save\_dataset} / \texttt{-\/-no\_save\_dataset} & boolean &
-путь до сохранения полного датасета, полученного путем агрегированния при рекурсивном поиске& \texttt{True} \\
+путь до сохранения полного датасета, полученного путем агрегирования при рекурсивном поиске& \texttt{True} \\
 \hline
 \texttt{-\/-accel\_mode} & choice (\texttt{data} \textbar{}
 \texttt{estimate} \textbar{} \texttt{off}) & как получить ускорения: data (напрямую из датасета), estimate (путем численного дифференцирования) или off (не использовать ускорения, принудительно использовать фильтрованную динамику) & \texttt{estimate} \\
@@ -573,7 +573,7 @@ rdc verification wrenches [OPTIONS]
 \texttt{-\/-rdc\_path} & text & путь до .rdcm модели &
 \texttt{rdc\_model\_new.rdcm} \\
 \hline
-\texttt{-\/-num\_poses} & integer & колличество положений для сбора датасета &
+\texttt{-\/-num\_poses} & integer & количество положений для сбора датасета &
 \texttt{1} \\
 \hline
 \texttt{-\/-tool\_link\_name} & text & название СК конца рабочего инструмента &
