@@ -18,13 +18,13 @@
 Структура программы:
 \begin{enumerate}
     \item \verb|./src/rdc_toolbox/|~--- содержит файлы библиотеки для синтеза и обучения моделей обратной динамики роботов;
-    \item \verb|./src/rdc_tools/|~--- содержит модули программы <<RDC Toolbox>>, которые являются исполняемыми командами;
+    \item \verb|./src/rdc_tools/|~--- содержит команды программы <<RDC Toolbox>>, которые являются исполняемыми командами;
     \begin{enumerate}
-        \item \verb|calibration/sensor_calibration.py|~--- заголовочный файл для работы с матрицами;
-        \item \verb|calibration/tool_calibration.py|~--- заголовочный файл для работы с матрицами;
+        \item \verb|calibration/sensor_calibration.py|~--- команда для калибровки датчика сил и моментов;
+        \item \verb|calibration/tool_calibration.py|~--- команда для калибровки рабочего инструмента;
 
-        \item \verb|verification/fs_verification.py|~--- исходный код для работы с матрицами;
-        \item \verb|verification/torques_verification.py|~--- исходный код для работы с матрицами;
+        \item \verb|verification/fs_verification.py|~--- команда для верификации оцениваемых сил и моментов на рабочем инструменте;
+        \item \verb|verification/torques_verification.py|~--- команда для верификации оцениваемых моментов в сочленениях робота;
         
         \item \verb|execution/exec_trajectory.py|~--- исходный код для работы с матрицами;
         
